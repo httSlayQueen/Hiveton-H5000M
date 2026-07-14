@@ -79,11 +79,11 @@ jobs:
           curl -o $PATCH_PATH/xray-core https://raw.githubusercontent.com/immortalwrt/packages/refs/heads/master/net/xray-core/Makefile
 
           # feeds列表
+          git clone https://github.com/FUjr/QModem.git $FEED_PATH/qmodem
           git clone https://github.com/Zerogiven-OpenWRT-Packages/luci-app-podman.git $FEED_PATH/luci-app-podman
           git clone https://github.com/Openwrt-Passwall/openwrt-passwall2.git $FEED_PATH/passwall2
           
           echo "src-link custom $FEED_PATH" >> $BUILD_PATH/feeds.conf.default
-          echo 'src-git qmodem https://github.com/FUjr/QModem.git;main' >> $BUILD_PATH/feeds.conf.default
 
           # 安装 feeds
           cd $BUILD_PATH
