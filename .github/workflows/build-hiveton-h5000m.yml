@@ -118,7 +118,11 @@ jobs:
           # 安装软件
           install_selected_packages
           # 应用补丁
-          apply_package_fixes
+          log "Applying package fixes"
+          cd "$ROOT_DIR/$SOURCE_DIR"
+          patch_mtk_wifi_utility_rbus_for_h5000m
+          patch_mtwifi_apcli_bssid_budget
+          verify_mtwifi_patch
 
           echo "status=success" >> $GITHUB_OUTPUT
 
