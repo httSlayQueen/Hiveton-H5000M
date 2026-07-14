@@ -10,6 +10,7 @@ env:
   REPO_BRANCH: mt798x-mt799x-6.6-mtwifi
   SOURCE_DIR: immortalwrt
   FEED_DIR: custom-feed
+  TZ: Asia/Shanghai
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
