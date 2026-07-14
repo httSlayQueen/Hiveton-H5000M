@@ -67,6 +67,8 @@ jobs:
           chmod +x ${{ github.workspace }}/scripts/local-build.sh
 
       - name: 获取源码，设置 feeds
+        id: feeds
+        if: (!cancelled())
         run: |
           BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
           FEED_PATH="${{ github.workspace }}/${{ env.FEED_DIR }}"
@@ -90,10 +92,26 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a -f
 
+          echo "status=success" >> $GITHUB_OUTPUT
+
       - name: 安装其他软件包
+        id: pkgs
+        if: steps.feeds.outputs.status == 'success' && !cancelled()
         shell: bash
         env:
+          ENABLE_ADGUARDHOME: false
+          ENABLE_OPENCLASH: false
+          ENABLE_NIKKI: false
           ENABLE_UPNP: true
+          ENABLE_VLMCSD: false
+          ENABLE_MOSDNS: false
+          ENABLE_DOCKERMAN: false
+          ENABLE_QMODEM_NEXT: false
+          ENABLE_QMODEM: false
+          ENABLE_HOMEPROXY: false
+          ENABLE_ADBYBY_PLUS: false
+          ENABLE_ORIGINAL_MODEM: false
+          ENABLE_EASYMESH: false
         run: |
           export PATH="/usr/lib/ccache:$PATH"
           export THREADS="$(nproc)"
@@ -101,7 +119,11 @@ jobs:
           source ${{ github.workspace }}/scripts/local-build.sh
           install_selected_packages
 
+          echo "status=success" >> $GITHUB_OUTPUT
+
       - name: 应用补丁
+        id: patch
+        if: steps.pkgs.outputs.status == 'success' && !cancelled()
         shell: bash
         run: |
           export PATH="/usr/lib/ccache:$PATH"
@@ -109,16 +131,23 @@ jobs:
           source ${{ github.workspace }}/scripts/local-build.sh
           apply_package_fixes
 
+          echo "status=success" >> $GITHUB_OUTPUT
+
       - name: 使用最新软件
+        id: latest
+        if: steps.patch.outputs.status == 'success' && !cancelled()
         run: |
           PATCH_PATH="${{ github.workspace }}/patches"
           PKG_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}/package/feeds/packages"
           cat $PATCH_PATH/podman > $PKG_PATH/podman/Makefile
           cat $PATCH_PATH/podman-patch > $PKG_PATH/podman/patches/010-do-not-build-docs.patch
           cat $PATCH_PATH/xray-core > $PKG_PATH/xray-core/Makefile
+
+          echo "status=success" >> $GITHUB_OUTPUT
           
       - name: 生成配置
         id: config
+        if: steps.latest.outputs.status == 'success' && !cancelled()
         run: |
           # 设置 .config
           cat $BUILD_PATH/defconfig/mt7987_mt7992.config > $BUILD_PATH/.config
@@ -129,6 +158,7 @@ jobs:
           cd $BUILD_PATH
           make defconfig
 
+          echo "status=success" >> $GITHUB_OUTPUT
 
       - name: 设置 ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -149,7 +179,8 @@ jobs:
             ${{ runner.os }}-build-${{ env.REPO_BRANCH }}-
       
       - name: make download
-        if: (!cancelled())
+        id: download
+        if: steps.config.outputs.status == 'success' && !cancelled()
         shell: bash
         run: |
           export PATH="/usr/lib/ccache:$PATH"
@@ -157,8 +188,11 @@ jobs:
           source ${{ github.workspace }}/scripts/local-build.sh
           prefetch_and_toolchain
 
+          echo "status=success" >> $GITHUB_OUTPUT
+
       - name: 编译固件
-        if: (!cancelled())
+        id: compile
+        if: steps.download.outputs.status == 'success' && !cancelled()
         shell: bash
         run: |
           export PATH="/usr/lib/ccache:$PATH"
@@ -167,9 +201,11 @@ jobs:
           compile_firmware
           collect_artifacts
 
+          echo "status=success" >> $GITHUB_OUTPUT
+
       - name: 检查构件
         id: artifacts
-        if: (!cancelled())
+        if: steps.compile.outputs.status == 'success' && !cancelled()
         shell: bash
         run: |
           set -euo pipefail
