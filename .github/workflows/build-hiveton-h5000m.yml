@@ -1,0 +1,224 @@
+name: Hiveton H5000M (ImmortalWrt 24.10)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 13 * * 3'
+
+env:
+  REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x-6.6
+  REPO_BRANCH: mt798x-mt799x-6.6-mtwifi
+  SOURCE_DIR: immortalwrt
+  FEED_DIR: custom-feed
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: 释放硬盘空间
+        uses: jlumbroso/free-disk-space@main
+        with:
+          # this might remove tools that are actually needed,
+          # if set to "true" but frees about 6 GB
+          tool-cache: false
+          
+          # all of these default to true, but feel free to set to
+          # "false" if necessary for your workflow
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: 安装编译依赖
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo timedatectl set-timezone "$TZ" || true
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ack antlr3 asciidoc autoconf automake autopoint binutils bison \
+            bzip2 ccache clang cmake cpio curl device-tree-compiler ecj fastjar flex gawk \
+            gettext gcc-multilib g++-multilib git gnutls-dev gperf haveged help2man intltool \
+            lib32gcc-s1 libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev \
+            libltdl-dev libmbedtls-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev \
+            libpython3-dev libreadline-dev libssl-dev libtool lld llvm lrzsz mkisofs msmtp \
+            nano ninja-build p7zip p7zip-full patch pkgconf python3 python3-pip python3-ply \
+            python3-pyelftools python3-setuptools qemu-utils re2c rsync scons squashfs-tools \
+            subversion swig texinfo uglifyjs unzip upx-ucl vim wget xmlto xxd zlib1g-dev \
+            rustc cargo golang-go zstd file 2>&1 | tail -3
+
+      - name: 检查代码
+        uses: actions/checkout@v7
+
+      - name: 添加可执行权限
+        run: |
+          chmod +x ${{ github.workspace }}/scripts/local-build.sh
+
+      - name: 获取源码，设置 feeds
+        run: |
+          BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
+          FEED_PATH="${{ github.workspace }}/${{ env.FEED_DIR }}"
+          PATCH_PATH="${{ github.workspace }}/patches"
+          # imm 源码
+          git clone ${{ env.REPO_URL }} --depth 1 -b ${{ env.REPO_BRANCH }} $BUILD_PATH
+          # 补丁：package 仓库最新软件
+          curl -o $PATCH_PATH/podman https://raw.githubusercontent.com/immortalwrt/packages/refs/heads/master/utils/podman/Makefile
+          curl -o $PATCH_PATH/podman-patch https://raw.githubusercontent.com/immortalwrt/packages/refs/heads/master/utils/podman/patches/010-do-not-build-docs.patch
+          curl -o $PATCH_PATH/xray-core https://raw.githubusercontent.com/immortalwrt/packages/refs/heads/master/net/xray-core/Makefile
+
+          # feeds列表
+          git clone https://github.com/Zerogiven-OpenWRT-Packages/luci-app-podman.git $FEED_PATH/luci-app-podman
+          git clone https://github.com/Openwrt-Passwall/openwrt-passwall2.git $FEED_PATH/passwall2
+          
+          echo "src-link custom $FEED_PATH" >> $BUILD_PATH/feeds.conf.default
+          echo 'src-git qmodem https://github.com/FUjr/QModem.git;main' >> $BUILD_PATH/feeds.conf.default
+
+          # 安装 feeds
+          cd $BUILD_PATH
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a -f
+
+      - name: 安装其他软件包
+        shell: bash
+        env:
+          ENABLE_UPNP: true
+        run: |
+          export PATH="/usr/lib/ccache:$PATH"
+          export THREADS="$(nproc)"
+          sed -i '/^main "\$@"$/d' ${{ github.workspace }}/scripts/local-build.sh
+          source ${{ github.workspace }}/scripts/local-build.sh
+          install_selected_packages
+
+      - name: 应用补丁
+        shell: bash
+        run: |
+          export PATH="/usr/lib/ccache:$PATH"
+          export THREADS="$(nproc)"
+          source ${{ github.workspace }}/scripts/local-build.sh
+          apply_package_fixes
+
+      - name: 使用最新软件
+        run: |
+          PATCH_PATH="${{ github.workspace }}/patches"
+          PKG_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}/package/feeds/packages"
+          cat $PATCH_PATH/podman > $PKG_PATH/podman/Makefile
+          cat $PATCH_PATH/podman-patch > $PKG_PATH/podman/patches/010-do-not-build-docs.patch
+          cat $PATCH_PATH/xray-core > $PKG_PATH/xray-core/Makefile
+          
+      - name: 生成配置
+        id: config
+        run: |
+          # 设置 .config
+          cat $BUILD_PATH/defconfig/mt7987_mt7992.config > $BUILD_PATH/.config
+          cat ${{ github.workspace }}/hiveton-h5000m.config >> $BUILD_PATH/.config
+          cat ${{ github.workspace }}/h5000m.extra.config >> $BUILD_PATH/.config
+          
+          BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
+          cd $BUILD_PATH
+          make defconfig
+
+
+      - name: 设置 ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: immortalwrt-h5000m-${{ env.REPO_BRANCH }}
+          max-size: 8G
+          save: true
+
+      - name: 恢复 ccache
+        uses: actions/cache@main
+        with:
+          path: |
+            ${{ env.SOURCE_DIR }}/dl
+            ${{ env.SOURCE_DIR }}/staging_dir/host
+            ${{ env.SOURCE_DIR }}/build_dir/host
+          key: ${{ runner.os }}-build-${{ env.REPO_BRANCH }}-${{ hashFiles('hiveton-h5000m.config', 'h5000m.extra.config', 'patches/**', 'scripts/local-build.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.REPO_BRANCH }}-
+      
+      - name: make download
+        if: !cancelled()
+        shell: bash
+        run: |
+          export PATH="/usr/lib/ccache:$PATH"
+          export THREADS="$(nproc)"
+          source ${{ github.workspace }}/scripts/local-build.sh
+          prefetch_and_toolchain
+
+      - name: 编译固件
+        if: !cancelled()
+        shell: bash
+        run: |
+          export PATH="/usr/lib/ccache:$PATH"
+          export THREADS="$(nproc)"
+          source ${{ github.workspace }}/scripts/local-build.sh
+          compile_firmware
+          collect_artifacts
+
+      - name: 检查构件
+        id: artifacts
+        if: !cancelled()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d artifacts ] || [ -z "$(ls -A artifacts 2>/dev/null)" ]; then
+            echo "❌ 未找到任何产物"
+            exit 1
+          fi
+          ls -lh artifacts/
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: 上传构件
+        if: steps.artifacts.outputs.status == 'success' && !cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ImmortalWrt-Hiveton-H5000M-${{ github.run_number }}
+          path: artifacts/
+          retention-days: 30
+
+
+      - name: Create info
+        id: info
+        if: steps.artifacts.outputs.status == 'success' && !cancelled()
+        run: |
+          cat > ${{ github.workspace }}/router-info.md <<EOF
+          🔗 运行: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          📦 源码: `${{ env.REPO_URL }}` @ `${{ env.REPO_BRANCH }}`
+
+          ## 📡 路由器后台信息
+          <a href="https://wkdaily.cpolar.cn/archives/1">
+           <img src="https://img.shields.io/badge/若下载慢可套用国内加速站下载-FC7C0D?logo=github&logoColor=fff&labelColor=000&style=for-the-badge"/>
+          </a>
+          
+          - 🏠 **后台地址**: 192.168.1.1
+          - 👤 **用户名**: root
+          - 🔑 **密码**: 无
+          - 📱 **移动网络支持**: [QModem](https://github.com/FUjr/QModem)
+          - 🚢 **容器支持**：[luci-app-podman](https://github.com/Zerogiven-OpenWRT-Packages/luci-app-podman)
+          - [x] **其他软件包**：[passwall2](https://github.com/Openwrt-Passwall/openwrt-passwall2)、UPnP
+          EOF
+
+          echo "release_tag=Hiveton-H5000M-$(date +"%Y.%m.%d")" >> $GITHUB_OUTPUT
+          echo "status=success" >> $GITHUB_OUTPUT
+          
+          
+      - name: Upload ImmortalWrt as release assets
+        if: steps.info.outputs.status == 'success' && !cancelled()
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.info.outputs.release_tag }}
+          body_path: ${{ github.workspace }}/router-info.md
+          files: |
+            artifacts/*
+          token: ${{ secrets.GITHUB_TOKEN }}
