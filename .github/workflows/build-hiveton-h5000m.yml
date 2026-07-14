@@ -148,7 +148,7 @@ jobs:
             ${{ runner.os }}-build-${{ env.REPO_BRANCH }}-
       
       - name: make download
-        if: !cancelled()
+        if: (!cancelled())
         shell: bash
         run: |
           export PATH="/usr/lib/ccache:$PATH"
@@ -157,7 +157,7 @@ jobs:
           prefetch_and_toolchain
 
       - name: 编译固件
-        if: !cancelled()
+        if: (!cancelled())
         shell: bash
         run: |
           export PATH="/usr/lib/ccache:$PATH"
@@ -168,7 +168,7 @@ jobs:
 
       - name: 检查构件
         id: artifacts
-        if: !cancelled()
+        if: (!cancelled())
         shell: bash
         run: |
           set -euo pipefail
