@@ -1580,7 +1580,7 @@ constexpr char S2C (char8_t const (\&s)[I])\
       echo "Toolchain build directories look usable"
     else
       log "Toolchain build incomplete; rebuilding toolchain"
-      rm -rf staging_dir/toolchain-* build_dir/toolchain-* 2>/dev/null || true
+      rm -rf staging_dir/toolchain-* build_dir/toolchain-*
       # Patch gcc-13.3.0 libcody before building — needed when host uses GCC 16+
       patch_toolchain_gcc_char8t
       # Build the full toolchain.  make world compiles libc, gcc, binutils into

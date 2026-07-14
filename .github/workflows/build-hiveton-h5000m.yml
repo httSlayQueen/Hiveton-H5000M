@@ -116,7 +116,7 @@ jobs:
           sed -i '/^main "\$@"$/d' ${{ github.workspace }}/scripts/local-build.sh
           source ${{ github.workspace }}/scripts/local-build.sh
           # 安装软件
-          install_selected_packages
+          #install_selected_packages
           # 应用补丁
           log "Applying package fixes"
           cd "$ROOT_DIR/$SOURCE_DIR"
