@@ -1,0 +1,316 @@
+name: Hiveton H5000M (ImmortalWrt 24.10)
+
+on:
+  schedule:
+    - cron: '0 13 * * 3'
+  workflow_dispatch:
+
+env:
+  REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x-6.6
+  REPO_BRANCH: mt798x-mt799x-6.6-mtwifi
+  SOURCE_DIR: immortalwrt
+  FEED_DIR: custom-feed
+  ARTIFACTS_DIR: artifacts
+  TZ: Asia/Shanghai
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 释放硬盘空间
+        uses: jlumbroso/free-disk-space@main
+        with:
+          # this might remove tools that are actually needed,
+          # if set to "true" but frees about 6 GB
+          tool-cache: false
+          
+          # all of these default to true, but feel free to set to
+          # "false" if necessary for your workflow
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: 安装编译依赖
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo timedatectl set-timezone "$TZ" || true
+          sudo apt update -y
+          sudo apt full-upgrade -y
+          sudo apt install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+            bzip2 ccache clang cmake cpio curl device-tree-compiler ecj fastjar flex gawk gettext gcc-multilib \
+            g++-multilib git gnutls-dev gperf haveged help2man intltool lib32gcc-s1 libc6-dev-i386 libelf-dev \
+            libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses-dev libpython3-dev \
+            libreadline-dev libssl-dev libtool libyaml-dev libz-dev lld llvm lrzsz mkisofs msmtp nano \
+            ninja-build p7zip p7zip-full patch pkgconf python3 python3-pip python3-ply python3-docutils \
+            python3-pyelftools qemu-utils re2c rsync scons squashfs-tools subversion swig texinfo uglifyjs \
+            upx-ucl unzip vim wget xmlto xxd zlib1g-dev zstd
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: 获取源码，设置 feeds
+        id: feeds
+        if: (!cancelled())
+        run: |
+          BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
+          FEED_PATH="${{ github.workspace }}/${{ env.FEED_DIR }}"
+          PATCH_PATH="${{ github.workspace }}/patches"
+          # imm 源码
+          git clone ${{ env.REPO_URL }} --depth 1 -b ${{ env.REPO_BRANCH }} $BUILD_PATH
+          # 补丁：package 仓库最新软件
+          curl -o $PATCH_PATH/podman https://raw.githubusercontent.com/immortalwrt/packages/refs/heads/master/utils/podman/Makefile
+          curl -o $PATCH_PATH/podman-patch https://raw.githubusercontent.com/immortalwrt/packages/refs/heads/master/utils/podman/patches/010-do-not-build-docs.patch
+
+          # feeds列表
+          git clone https://github.com/FUjr/QModem.git --depth 1 -b main $FEED_PATH/qmodem
+          git clone https://github.com/Zerogiven-OpenWRT-Packages/luci-app-podman.git --depth 1 -b main $FEED_PATH/luci-app-podman
+          git clone https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git --depth 1 -b main $FEED_PATH/passwall-packages
+          git clone https://github.com/Openwrt-Passwall/openwrt-passwall2.git --depth 1 -b main $FEED_PATH/passwall2
+          
+          sed -i "1i src-link custom $FEED_PATH" $BUILD_PATH/feeds.conf.default
+
+          # adjust qmodem
+          rm -rf "$BUILD_PATH/package/mtk/applications/5g-modem"
+
+          # 安装 feeds
+          cd $BUILD_PATH
+          ./scripts/feeds update -a
+          ./scripts/feeds install -af
+
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: 添加可执行权限
+        run: |
+          chmod +x ${{ github.workspace }}/scripts/local-build.sh
+          chmod +x ${{ github.workspace }}/scripts/99-custom.sh
+
+      - name: 应用补丁 & 自定义文件
+        id: patch
+        if: steps.feeds.outputs.status == 'success' && !cancelled()
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATCH_PATH="${{ github.workspace }}/patches"
+          BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
+          PKG_PATH="$BUILD_PATH/feeds/packages"
+          cd $BUILD_PATH
+
+          # patch_mtk_wifi_utility_rbus_for_h5000m
+          rbus_patch="target/linux/mediatek/patches-6.6/0101-add-mtk-wifi-utility-rbus.patch"
+          if grep -q '^+obj-y[[:space:]]*+=[[:space:]]*wifi_utility/' "$rbus_patch"; then
+            echo "Making MTK wifi_utility rbus optional for H5000M PCIe WiFi"
+            sed -i 's/^+obj-y[[:space:]]*+=[[:space:]]*wifi_utility\//+obj-$(CONFIG_MTK_WIFI_UTILITY_RBUS) += wifi_utility\//g' "$rbus_patch"
+          fi
+          grep -q '^+obj-$(CONFIG_MTK_WIFI_UTILITY_RBUS)[[:space:]]*+=[[:space:]]*wifi_utility/' "$rbus_patch" || \
+            (echo "MTK wifi_utility rbus patch guard verification failed" && exit 1)
+
+          # patch_mtwifi_apcli_bssid_budget
+          patch_file="${{ github.workspace }}/patches/mtwifi-apcli-active-only.patch"
+          if patch -p1 --forward --dry-run < "$patch_file" >/dev/null 2>&1; then
+            patch -p1 < "$patch_file"
+          elif patch -p1 --reverse --dry-run < "$patch_file" >/dev/null 2>&1; then
+            echo "MTK WiFi APCLI active-only patch already applied"
+          else
+            echo "Unable to apply MTK WiFi APCLI active-only patch"
+            exit 1
+          fi
+
+          # 最新源码
+          cat $PATCH_PATH/podman > $PKG_PATH/utils/podman/Makefile
+          cat $PATCH_PATH/podman-patch > $PKG_PATH/utils/podman/patches/010-do-not-build-docs.patch
+
+          # golang 1.26.x
+          rm -rf "$PKG_PATH/lang/golang"
+          git clone https://github.com/sbwml/packages_lang_golang -b 26.x $PKG_PATH/lang/golang
+
+          # rust - llvm.download-ci-llvm = true
+          rm -rf "$PKG_PATH/lang/rust"
+          git clone https://github.com/sbwml/packages_lang_rust $PKG_PATH/lang/rust
+
+          # 添加自定义文件
+          CUSTOM_PATH="$BUILD_PATH/files"
+          mkdir -p "$CUSTOM_PATH/etc/uci-defaults"
+          cp "${{ github.workspace }}/scripts/99-custom.sh" "$CUSTOM_PATH/etc/uci-defaults"
+
+          echo "status=success" >> $GITHUB_OUTPUT
+          
+      - name: 生成配置
+        id: config
+        if: steps.patch.outputs.status == 'success' && !cancelled()
+        run: |
+          BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
+          # 设置 .config
+          cat $BUILD_PATH/defconfig/mt7987_mt7992.config > $BUILD_PATH/.config
+          cat ${{ github.workspace }}/hiveton-h5000m.config >> $BUILD_PATH/.config
+          cat ${{ github.workspace }}/h5000m.extra.config >> $BUILD_PATH/.config
+
+          disabled_pkgs=("luci-app-modem" "sms-tool")
+          for pkg in "${disabled_pkgs[@]}"; do
+            sed -i "s/CONFIG_DEFAULT_${pkg}=y/CONFIG_DEFAULT_${pkg}=n/g" $BUILD_PATH/.config
+            sed -i "s/CONFIG_PACKAGE_${pkg}=y/CONFIG_PACKAGE_${pkg}=n/g" $BUILD_PATH/.config
+          done
+          
+          cd $BUILD_PATH
+          make defconfig
+
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: 设置 ccache
+        uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          key: immortalwrt-h5000m-${{ env.REPO_BRANCH }}
+          max-size: 8G
+          save: true
+
+      - name: 恢复 ccache
+        uses: actions/cache@main
+        with:
+          path: |
+            ${{ github.workspace }}/${{ env.SOURCE_DIR }}/dl
+            ${{ github.workspace }}/${{ env.SOURCE_DIR }}/staging_dir/host
+            ${{ github.workspace }}/${{ env.SOURCE_DIR }}/build_dir/host
+          key: ${{ runner.os }}-build-${{ env.REPO_BRANCH }}-${{ hashFiles('hiveton-h5000m.config', 'h5000m.extra.config', 'patches/**') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.REPO_BRANCH }}-
+      
+      - name: MAKE DOWNLOAD!
+        id: download
+        if: steps.config.outputs.status == 'success' && !cancelled()
+        shell: bash
+        run: |
+          export PATH="/usr/lib/ccache:$PATH"
+          export THREADS="$(nproc)"
+          BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
+          cd $BUILD_PATH
+
+          echo "Downloading package sources"
+          make download -j"$THREADS"
+          find dl -size -1024c -delete
+
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: 编译固件
+        id: compile
+        if: steps.download.outputs.status == 'success' && !cancelled()
+        shell: bash
+        run: |
+          export PATH="/usr/lib/ccache:$PATH"
+          export THREADS="$(nproc)"
+          BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
+          cd $BUILD_PATH
+
+          export CCACHE_DIR="$BUILD_PATH/build_dir/ccache"
+          export CCACHE_SIZE="8G"
+          mkdir -p "$CCACHE_DIR"
+
+          echo "Cleaning Go module cache before Go package builds"
+          rm -rf dl/go-mod-cache tmp/go-build
+
+          echo "Compiling firmware with ${THREADS} threads"
+          make -j"$THREADS" || make -j1 V=s
+
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: 检查构件
+        id: artifacts
+        if: steps.compile.outputs.status == 'success' && !cancelled()
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
+          ARTIFACTS_PATH="${{ github.workspace }}/${{ env.ARTIFACTS_DIR }}"
+
+          echo "Collecting firmware artifacts"
+          mkdir -p "$ARTIFACTS_PATH"
+          find "$BUILD_PATH/bin/targets" -type f \( -name '*.bin' -o -name '*.img.gz' \) -exec cp -f {} "$ARTIFACTS_PATH/" \;
+          find "$BUILD_PATH/bin/targets" -type f -name 'config.buildinfo' -exec cp -f {} "$ARTIFACTS_PATH/" \;
+          find "$BUILD_PATH/bin/targets" -type f -name '*hiveton-h5000m*.manifest' -exec cp -f {} "$ARTIFACTS_PATH/openwrt-image.manifest" \; -quit
+
+          for image_pkg in \
+            kmod-mt_wifi_cmn \
+            kmod-mt_wifi7 \
+            kmod-mt_hwifi \
+            kmod-mtk_pci \
+            kmod-mtk_wed \
+            kmod-connac_if \
+            kmod-mt7992 \
+            kmod-mt799a \
+            mtwifi-cfg \
+            luci-app-mtwifi-cfg \
+            luci-i18n-mtwifi-cfg-zh-cn; do
+            grep -q "^${image_pkg}[[:space:]-]" "$ARTIFACTS_PATH/openwrt-image.manifest" || \
+              (echo "Firmware image manifest is missing required package: ${image_pkg}" && exit 1)
+          done
+
+          {
+            echo "ImmortalWrt 24.10 for Hiveton H5000M"
+            echo "Build time: $(date '+%Y-%m-%d %H:%M:%S')"
+            echo "Source: ${{ env.REPO_URL }} @ ${{ env.REPO_BRANCH }}"
+            echo
+            echo "Artifacts:"
+            (cd "$ARTIFACTS_PATH" && ls -lh | sed 's/^/  /')
+          } > "$ARTIFACTS_PATH/MANIFEST.txt"
+
+          if [ ! -d $ARTIFACTS_PATH ] || [ -z "$(ls -A $ARTIFACTS_PATH)" ]; then
+            echo "❌ 未找到任何产物"
+            exit 1
+          fi
+          ls -lh $ARTIFACTS_PATH/
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: 上传构件
+        if: steps.artifacts.outputs.status == 'success' && !cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ImmortalWrt-Hiveton-H5000M-${{ github.run_number }}
+          path: ${{ env.ARTIFACTS_DIR }}/
+          retention-days: 30
+
+
+      - name: Create info
+        id: info
+        if: steps.artifacts.outputs.status == 'success' && !cancelled()
+        run: |
+          cat > ${{ github.workspace }}/router-info.md <<EOF
+          🔗 运行: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          📦 源码: ${{ env.REPO_URL }} @ ${{ env.REPO_BRANCH }}
+
+          ## 📡 路由器后台信息
+          <a href="https://wkdaily.cpolar.cn/archives/1">
+           <img src="https://img.shields.io/badge/若下载慢可套用国内加速站下载-FC7C0D?logo=github&logoColor=fff&labelColor=000&style=for-the-badge"/>
+          </a>
+          
+          - 🏠 **后台地址**: `192.168.100.1`
+          - 👤 **用户名**: `root`
+          - 🔑 **密码**: `admin`
+          - 📱 **移动网络支持**: [QModem](https://github.com/FUjr/QModem)
+          - 🚢 **容器支持**：[luci-app-podman](https://github.com/Zerogiven-OpenWRT-Packages/luci-app-podman)
+          - 🦽 **其他软件包**：[passwall2](https://github.com/Openwrt-Passwall/openwrt-passwall2)、UPnP
+          EOF
+
+          echo "release_tag=ImmortalWrt-24.10-SNAPSHOT" >> $GITHUB_OUTPUT
+          echo "status=success" >> $GITHUB_OUTPUT
+          
+          
+      - name: Upload ImmortalWrt as release assets
+        if: steps.info.outputs.status == 'success' && !cancelled()
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.info.outputs.release_tag }}
+          body_path: ${{ github.workspace }}/router-info.md
+          files: |
+            ${{ env.ARTIFACTS_DIR }}/*
+          token: ${{ secrets.GITHUB_TOKEN }}
