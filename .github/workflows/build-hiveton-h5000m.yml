@@ -70,8 +70,8 @@ jobs:
         id: feeds
         if: (!cancelled())
         run: |
-          BUILD_PATH="${{ github.workspace }}/../${{ env.SOURCE_DIR }}"
-          FEED_PATH="${{ github.workspace }}/../${{ env.FEED_DIR }}"
+          BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
+          FEED_PATH="${{ github.workspace }}/${{ env.FEED_DIR }}"
           PATCH_PATH="${{ github.workspace }}/patches"
           # imm 源码
           git clone ${{ env.REPO_URL }} --depth 1 -b ${{ env.REPO_BRANCH }} $BUILD_PATH
@@ -129,7 +129,7 @@ jobs:
         if: steps.pkgs.outputs.status == 'success' && !cancelled()
         run: |
           PATCH_PATH="${{ github.workspace }}/patches"
-          PKG_PATH="${{ github.workspace }}/../${{ env.SOURCE_DIR }}/package/feeds/packages"
+          PKG_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}/package/feeds/packages"
           cat $PATCH_PATH/podman > $PKG_PATH/podman/Makefile
           cat $PATCH_PATH/podman-patch > $PKG_PATH/podman/patches/010-do-not-build-docs.patch
           cat $PATCH_PATH/xray-core > $PKG_PATH/xray-core/Makefile
@@ -140,7 +140,7 @@ jobs:
         id: config
         if: steps.latest.outputs.status == 'success' && !cancelled()
         run: |
-          BUILD_PATH="${{ github.workspace }}/../${{ env.SOURCE_DIR }}"
+          BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
           # 设置 .config
           cat $BUILD_PATH/defconfig/mt7987_mt7992.config > $BUILD_PATH/.config
           cat ${{ github.workspace }}/hiveton-h5000m.config >> $BUILD_PATH/.config
@@ -162,9 +162,9 @@ jobs:
         uses: actions/cache@main
         with:
           path: |
-            ${{ github.workspace }}/../${{ env.SOURCE_DIR }}/dl
-            ${{ github.workspace }}/../${{ env.SOURCE_DIR }}/staging_dir/host
-            ${{ github.workspace }}/../${{ env.SOURCE_DIR }}/build_dir/host
+            ${{ github.workspace }}/${{ env.SOURCE_DIR }}/dl
+            ${{ github.workspace }}/${{ env.SOURCE_DIR }}/staging_dir/host
+            ${{ github.workspace }}/${{ env.SOURCE_DIR }}/build_dir/host
           key: ${{ runner.os }}-build-${{ env.REPO_BRANCH }}-${{ hashFiles('hiveton-h5000m.config', 'h5000m.extra.config', 'patches/**', 'scripts/local-build.sh') }}
           restore-keys: |
             ${{ runner.os }}-build-${{ env.REPO_BRANCH }}-
