@@ -70,8 +70,8 @@ jobs:
         id: feeds
         if: (!cancelled())
         run: |
-          BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
-          FEED_PATH="${{ github.workspace }}/${{ env.FEED_DIR }}"
+          BUILD_PATH="${{ github.workspace }}/../${{ env.SOURCE_DIR }}"
+          FEED_PATH="${{ github.workspace }}/../${{ env.FEED_DIR }}"
           PATCH_PATH="${{ github.workspace }}/patches"
           # imm 源码
           git clone ${{ env.REPO_URL }} --depth 1 -b ${{ env.REPO_BRANCH }} $BUILD_PATH
@@ -94,7 +94,7 @@ jobs:
 
           echo "status=success" >> $GITHUB_OUTPUT
 
-      - name: 安装其他软件包
+      - name: 安装其他软件包 & 应用补丁
         id: pkgs
         if: steps.feeds.outputs.status == 'success' && !cancelled()
         shell: bash
@@ -117,28 +117,19 @@ jobs:
           export THREADS="$(nproc)"
           sed -i '/^main "\$@"$/d' ${{ github.workspace }}/scripts/local-build.sh
           source ${{ github.workspace }}/scripts/local-build.sh
+          # 安装软件
           install_selected_packages
-
-          echo "status=success" >> $GITHUB_OUTPUT
-
-      - name: 应用补丁
-        id: patch
-        if: steps.pkgs.outputs.status == 'success' && !cancelled()
-        shell: bash
-        run: |
-          export PATH="/usr/lib/ccache:$PATH"
-          export THREADS="$(nproc)"
-          source ${{ github.workspace }}/scripts/local-build.sh
+          # 应用补丁
           apply_package_fixes
 
           echo "status=success" >> $GITHUB_OUTPUT
 
       - name: 使用最新软件
         id: latest
-        if: steps.patch.outputs.status == 'success' && !cancelled()
+        if: steps.pkgs.outputs.status == 'success' && !cancelled()
         run: |
           PATCH_PATH="${{ github.workspace }}/patches"
-          PKG_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}/package/feeds/packages"
+          PKG_PATH="${{ github.workspace }}/../${{ env.SOURCE_DIR }}/package/feeds/packages"
           cat $PATCH_PATH/podman > $PKG_PATH/podman/Makefile
           cat $PATCH_PATH/podman-patch > $PKG_PATH/podman/patches/010-do-not-build-docs.patch
           cat $PATCH_PATH/xray-core > $PKG_PATH/xray-core/Makefile
@@ -149,12 +140,12 @@ jobs:
         id: config
         if: steps.latest.outputs.status == 'success' && !cancelled()
         run: |
+          BUILD_PATH="${{ github.workspace }}/../${{ env.SOURCE_DIR }}"
           # 设置 .config
           cat $BUILD_PATH/defconfig/mt7987_mt7992.config > $BUILD_PATH/.config
           cat ${{ github.workspace }}/hiveton-h5000m.config >> $BUILD_PATH/.config
           cat ${{ github.workspace }}/h5000m.extra.config >> $BUILD_PATH/.config
           
-          BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
           cd $BUILD_PATH
           make defconfig
 
@@ -171,9 +162,9 @@ jobs:
         uses: actions/cache@main
         with:
           path: |
-            ${{ env.SOURCE_DIR }}/dl
-            ${{ env.SOURCE_DIR }}/staging_dir/host
-            ${{ env.SOURCE_DIR }}/build_dir/host
+            ${{ github.workspace }}/../${{ env.SOURCE_DIR }}/dl
+            ${{ github.workspace }}/../${{ env.SOURCE_DIR }}/staging_dir/host
+            ${{ github.workspace }}/../${{ env.SOURCE_DIR }}/build_dir/host
           key: ${{ runner.os }}-build-${{ env.REPO_BRANCH }}-${{ hashFiles('hiveton-h5000m.config', 'h5000m.extra.config', 'patches/**', 'scripts/local-build.sh') }}
           restore-keys: |
             ${{ runner.os }}-build-${{ env.REPO_BRANCH }}-
