@@ -1,7 +1,6 @@
 name: Hiveton H5000M (ImmortalWrt 24.10)
 
 on:
-  workflow_dispatch:
   schedule:
     - cron: '0 13 * * 3'
 
