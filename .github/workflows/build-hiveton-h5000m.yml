@@ -3,6 +3,7 @@ name: Hiveton H5000M (ImmortalWrt 24.10)
 on:
   schedule:
     - cron: '0 13 * * 3'
+  workflow_dispatch:
 
 env:
   REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x-6.6
