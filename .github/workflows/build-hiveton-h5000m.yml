@@ -190,33 +190,11 @@ jobs:
 
           echo "status=success" >> $GITHUB_OUTPUT
 
-      - name: 构建 toolchain
-        id: toolchain
-        if: steps.config.outputs.status == 'success' && !cancelled()
-        shell: bash
-        run: |
-          set -euo pipefail
-          export PATH="/usr/lib/ccache:$PATH"
-          export THREADS="$(nproc)"
-          BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
-          cd $BUILD_PATH
-
-          echo "Validating prebuilt toolchain cache"
-          if [ -n "$(find build_dir/toolchain-* -maxdepth 3 -name 'gcc' -type f 2>/dev/null | head -1)" ] && [ -n "$(find build_dir/toolchain-* -maxdepth 3 -name 'ld' -type f 2>/dev/null | head -1)" ]; then
-            echo "Toolchain build directories look usable"
-          else
-            echo "Toolchain build incomplete; rebuilding toolchain"
-            make world -j"$THREADS"
-          fi
-
-          echo "status=success" >> $GITHUB_OUTPUT
-
       - name: 编译固件
         id: compile
-        if: steps.toolchain.outputs.status == 'success' && !cancelled()
+        if: steps.download.outputs.status == 'success' && !cancelled()
         shell: bash
         run: |
-          set -euo pipefail
           export PATH="/usr/lib/ccache:$PATH"
           export THREADS="$(nproc)"
           BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
