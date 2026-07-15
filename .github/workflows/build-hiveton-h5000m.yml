@@ -104,7 +104,7 @@ jobs:
           cd $BUILD_PATH
 
           # patch_mtk_wifi_utility_rbus_for_h5000m
-          local rbus_patch="target/linux/mediatek/patches-6.6/0101-add-mtk-wifi-utility-rbus.patch"
+          rbus_patch="target/linux/mediatek/patches-6.6/0101-add-mtk-wifi-utility-rbus.patch"
           if grep -q '^+obj-y[[:space:]]*+=[[:space:]]*wifi_utility/' "$rbus_patch"; then
             log "Making MTK wifi_utility rbus optional for H5000M PCIe WiFi"
             sed -i 's/^+obj-y[[:space:]]*+=[[:space:]]*wifi_utility\//+obj-$(CONFIG_MTK_WIFI_UTILITY_RBUS) += wifi_utility\//g' "$rbus_patch"
@@ -113,7 +113,7 @@ jobs:
             (log "MTK wifi_utility rbus patch guard verification failed" && exit 1)
 
           # patch_mtwifi_apcli_bssid_budget
-          local patch_file="${{ github.workspace }}/patches/mtwifi-apcli-active-only.patch"
+          patch_file="${{ github.workspace }}/patches/mtwifi-apcli-active-only.patch"
           if patch -p1 --forward --dry-run < "$patch_file" >/dev/null 2>&1; then
             patch -p1 < "$patch_file"
           elif patch -p1 --reverse --dry-run < "$patch_file" >/dev/null 2>&1; then
@@ -249,7 +249,6 @@ jobs:
           find "$BUILD_PATH/bin/targets" -type f \( -name '*.bin' -o -name '*.img.gz' \) -exec cp -f {} "$ARTIFACTS_PATH/" \;
           find "$BUILD_PATH/bin/targets" -type f -name '*hiveton-h5000m*.manifest' -exec cp -f {} "$ARTIFACTS_PATH/openwrt-image.manifest" \; -quit
 
-          local image_pkg
           for image_pkg in \
             kmod-mt_wifi_cmn \
             kmod-mt_wifi7 \
