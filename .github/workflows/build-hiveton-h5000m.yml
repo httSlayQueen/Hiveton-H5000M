@@ -131,6 +131,9 @@ jobs:
             exit 1
           fi
 
+          # adjust qmodem
+          rm -rf "$BUILD_PATH/package/mtk/applications/5g-modem"
+
           # 最新源码
           cat $PATCH_PATH/podman > $PKG_PATH/podman/Makefile
           cat $PATCH_PATH/podman-patch > $PKG_PATH/podman/patches/010-do-not-build-docs.patch
@@ -160,6 +163,11 @@ jobs:
           cat $BUILD_PATH/defconfig/mt7987_mt7992.config > $BUILD_PATH/.config
           cat ${{ github.workspace }}/hiveton-h5000m.config >> $BUILD_PATH/.config
           cat ${{ github.workspace }}/h5000m.extra.config >> $BUILD_PATH/.config
+
+          disabled_pkgs=("luci-app-modem")
+          for pkg in "${disabled_pkgs[@]}"; do
+            sed -i "s/CONFIG_PACKAGE_${pkg}=y/CONFIG_PACKAGE_${pkg}=n/g" .config
+          done
           
           cd $BUILD_PATH
           make defconfig
@@ -184,7 +192,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-build-${{ env.REPO_BRANCH }}-
       
-      - name: 下载源码
+      - name: MAKE DOWNLOAD!
         id: download
         if: steps.config.outputs.status == 'success' && !cancelled()
         shell: bash
