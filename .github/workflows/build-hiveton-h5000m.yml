@@ -93,6 +93,9 @@ jobs:
           
           echo "src-link custom $FEED_PATH" >> $BUILD_PATH/feeds.conf.default
 
+          # adjust qmodem
+          rm -rf "$BUILD_PATH/package/mtk/applications/5g-modem"
+
           # 安装 feeds
           cd $BUILD_PATH
           ./scripts/feeds update -a
@@ -108,7 +111,7 @@ jobs:
           set -euo pipefail
           PATCH_PATH="${{ github.workspace }}/patches"
           BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
-          PKG_PATH="$BUILD_PATH/package/feeds/packages"
+          PKG_PATH="$BUILD_PATH/feeds/packages"
           cd $BUILD_PATH
 
           # patch_mtk_wifi_utility_rbus_for_h5000m
@@ -131,13 +134,10 @@ jobs:
             exit 1
           fi
 
-          # adjust qmodem
-          rm -rf "$BUILD_PATH/package/mtk/applications/5g-modem"
-
           # 最新源码
-          cat $PATCH_PATH/podman > $PKG_PATH/podman/Makefile
-          cat $PATCH_PATH/podman-patch > $PKG_PATH/podman/patches/010-do-not-build-docs.patch
-          cat $PATCH_PATH/xray-core > $PKG_PATH/xray-core/Makefile
+          cat $PATCH_PATH/podman > $PKG_PATH/utils/podman/Makefile
+          cat $PATCH_PATH/podman-patch > $PKG_PATH/utils/podman/patches/010-do-not-build-docs.patch
+          cat $PATCH_PATH/xray-core > $PKG_PATH/net/xray-core/Makefile
 
           # golang 1.26.x
           rm -rf "$PKG_PATH/lang/golang"
@@ -164,8 +164,9 @@ jobs:
           cat ${{ github.workspace }}/hiveton-h5000m.config >> $BUILD_PATH/.config
           cat ${{ github.workspace }}/h5000m.extra.config >> $BUILD_PATH/.config
 
-          disabled_pkgs=("luci-app-modem")
+          disabled_pkgs=("luci-app-modem" "sms-tool")
           for pkg in "${disabled_pkgs[@]}"; do
+            sed -i "s/CONFIG_DEFAULT_${pkg}=y/CONFIG_DEFAULT_${pkg}=n/g" $BUILD_PATH/.config
             sed -i "s/CONFIG_PACKAGE_${pkg}=y/CONFIG_PACKAGE_${pkg}=n/g" $BUILD_PATH/.config
           done
           
