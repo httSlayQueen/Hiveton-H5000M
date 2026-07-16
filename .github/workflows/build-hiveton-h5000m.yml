@@ -100,7 +100,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          PATCH_PATH="${{ github.workspace }}/patches"
           BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
+          PKG_PATH="$BUILD_PATH/package/feeds/packages"
           cd $BUILD_PATH
 
           # patch_mtk_wifi_utility_rbus_for_h5000m
@@ -123,28 +125,29 @@ jobs:
             exit 1
           fi
 
+          # 最新源码
+          cat $PATCH_PATH/podman > $PKG_PATH/podman/Makefile
+          cat $PATCH_PATH/podman-patch > $PKG_PATH/podman/patches/010-do-not-build-docs.patch
+          cat $PATCH_PATH/xray-core > $PKG_PATH/xray-core/Makefile
+
+          # golang 1.26.x
+          rm -rf "$PKG_PATH/lang/golang"
+          git clone https://github.com/sbwml/packages_lang_golang -b 26.x $PKG_PATH/lang/golang
+
+          # rust - llvm.download-ci-llvm = true
+          rm -rf "$PKG_PATH/lang/rust"
+          git clone https://github.com/sbwml/packages_lang_rust $PKG_PATH/lang/rust
+
           # 添加自定义文件
           CUSTOM_PATH="$BUILD_PATH/files"
           mkdir -p "$CUSTOM_PATH/etc/uci-defaults"
           cp "${{ github.workspace }}/scripts/99-custom.sh" "$CUSTOM_PATH/etc/uci-defaults"
 
           echo "status=success" >> $GITHUB_OUTPUT
-
-      - name: 部分软件包使用最新源码
-        id: latest
-        if: steps.patch.outputs.status == 'success' && !cancelled()
-        run: |
-          PATCH_PATH="${{ github.workspace }}/patches"
-          PKG_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}/package/feeds/packages"
-          cat $PATCH_PATH/podman > $PKG_PATH/podman/Makefile
-          cat $PATCH_PATH/podman-patch > $PKG_PATH/podman/patches/010-do-not-build-docs.patch
-          cat $PATCH_PATH/xray-core > $PKG_PATH/xray-core/Makefile
-
-          echo "status=success" >> $GITHUB_OUTPUT
           
       - name: 生成配置
         id: config
-        if: steps.latest.outputs.status == 'success' && !cancelled()
+        if: steps.patch.outputs.status == 'success' && !cancelled()
         run: |
           BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
           # 设置 .config
@@ -158,7 +161,7 @@ jobs:
           echo "status=success" >> $GITHUB_OUTPUT
 
       - name: 设置 ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@v1.2.23
         with:
           key: immortalwrt-h5000m-${{ env.REPO_BRANCH }}
           max-size: 8G
