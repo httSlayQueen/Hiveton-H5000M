@@ -1,16 +1,16 @@
 # ImmortalWrt H5000M 自动编译
 
-[![Build](https://github.com/existyay/Auto-H5000M-BIN/actions/workflows/build-test.yml/badge.svg)](https://github.com/existyay/Auto-H5000M-BIN/actions/workflows/build-test.yml)
+[![Build](https://github.com/httSlayQueen/Hiveton-H5000M/actions/workflows/build-hiveton-h5000m.yml/badge.svg)](https://github.com/httSlayQueen/Hiveton-H5000M/actions/workflows/build-hiveton-h5000m.yml)
 
 基于 [`padavanonly/immortalwrt-mt798x-24.10`](https://github.com/padavanonly/immortalwrt-mt798x-24.10) 的 `mt798x-mt799x-6.6-mtwifi` 分支，为 **Hiveton H5000M (MT7992 filogic)** 自动编译固件。
 
-固件下载：[Releases](https://github.com/existyay/Auto-H5000M-BIN/releases)
+固件下载：[Releases](https://github.com/httSlayQueen/Hiveton-H5000M/releases)
 
 | 项目 | 值 |
 | --- | --- |
-| 默认地址 | `192.168.6.1` / `immortalwrt.lan` |
+| 默认地址 | `192.168.100.1` / `immortalwrt.lan` |
 | 用户名 | `root` |
-| 密码 | `admin` |
+| 密码 | 无 |
 
 ---
 
@@ -18,9 +18,10 @@
 
 ```
 .
-├── .github/workflows/build-test.yml   # GitHub Actions 工作流 (调用 local-build.sh)
-├── feeds.conf.default                 # OpenWrt feeds 配置
-├── h5000m.extra.config              # 追加到 .config 的本机特定配置
+├── .github/workflows/build-hiveton-h5000m.yml      # 本 fork 使用的工作流
+├── .github/workflows/build-test.yml                # GitHub Actions 工作流 (调用 local-build.sh)
+├── feeds.conf.default                              # OpenWrt feeds 配置
+├── h5000m.extra.config                             # 追加到 .config 的本机特定配置
 ├── patches/
 │   └── mtwifi-apcli-active-only.patch # MTK WiFi AP/APCLI active-only 持久补丁
 └── scripts/

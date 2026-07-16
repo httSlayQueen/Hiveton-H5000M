@@ -243,6 +243,7 @@ jobs:
           echo "Collecting firmware artifacts"
           mkdir -p "$ARTIFACTS_PATH"
           find "$BUILD_PATH/bin/targets" -type f \( -name '*.bin' -o -name '*.img.gz' \) -exec cp -f {} "$ARTIFACTS_PATH/" \;
+          find "$BUILD_PATH/bin/targets" -type f -name 'config.buildinfo' -exec cp -f {} "$ARTIFACTS_PATH/" \;
           find "$BUILD_PATH/bin/targets" -type f -name '*hiveton-h5000m*.manifest' -exec cp -f {} "$ARTIFACTS_PATH/openwrt-image.manifest" \; -quit
 
           for image_pkg in \
@@ -292,19 +293,20 @@ jobs:
         run: |
           cat > ${{ github.workspace }}/router-info.md <<EOF
           🔗 运行: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          📦 源码: `${{ env.REPO_URL }}` @ `${{ env.REPO_BRANCH }}`
+          📦 源码: ${{ env.REPO_URL }} @ ${{ env.REPO_BRANCH }}
 
           ## 📡 路由器后台信息
           <a href="https://wkdaily.cpolar.cn/archives/1">
            <img src="https://img.shields.io/badge/若下载慢可套用国内加速站下载-FC7C0D?logo=github&logoColor=fff&labelColor=000&style=for-the-badge"/>
           </a>
           
-          - 🏠 **后台地址**: 192.168.1.1
+          - 🏠 **后台地址**: 192.168.100.1
           - 👤 **用户名**: root
           - 🔑 **密码**: 无
+          - 🔑 **固件空间**: 1024 MB
           - 📱 **移动网络支持**: [QModem](https://github.com/FUjr/QModem)
           - 🚢 **容器支持**：[luci-app-podman](https://github.com/Zerogiven-OpenWRT-Packages/luci-app-podman)
-          - [x] **其他软件包**：[passwall2](https://github.com/Openwrt-Passwall/openwrt-passwall2)、UPnP
+          - 🦽 **其他软件包**：[passwall2](https://github.com/Openwrt-Passwall/openwrt-passwall2)、UPnP
           EOF
 
           echo "release_tag=Hiveton-H5000M-$(date +"%Y.%m.%d")" >> $GITHUB_OUTPUT
