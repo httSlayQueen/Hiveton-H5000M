@@ -58,7 +58,13 @@ jobs:
             python3-pyelftools qemu-utils re2c rsync scons squashfs-tools subversion swig texinfo uglifyjs \
             upx-ucl unzip vim wget xmlto xxd zlib1g-dev zstd
 
-      - name: 检查代码
+      - name: 配置 Go 1.26
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          check-latest: true
+
+      - name: Checkout
         uses: actions/checkout@v7
 
       - name: 添加可执行权限
