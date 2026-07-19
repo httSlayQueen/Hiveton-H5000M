@@ -84,12 +84,12 @@ jobs:
           # 补丁：package 仓库最新软件
           curl -o $PATCH_PATH/podman https://raw.githubusercontent.com/immortalwrt/packages/refs/heads/master/utils/podman/Makefile
           curl -o $PATCH_PATH/podman-patch https://raw.githubusercontent.com/immortalwrt/packages/refs/heads/master/utils/podman/patches/010-do-not-build-docs.patch
-          curl -o $PATCH_PATH/xray-core https://raw.githubusercontent.com/immortalwrt/packages/refs/heads/master/net/xray-core/Makefile
 
           # feeds列表
-          git clone https://github.com/FUjr/QModem.git $FEED_PATH/qmodem
-          git clone https://github.com/Zerogiven-OpenWRT-Packages/luci-app-podman.git $FEED_PATH/luci-app-podman
-          git clone https://github.com/Openwrt-Passwall/openwrt-passwall2.git $FEED_PATH/passwall2
+          git clone https://github.com/FUjr/QModem.git --depth 1 -b main $FEED_PATH/qmodem
+          git clone https://github.com/Zerogiven-OpenWRT-Packages/luci-app-podman.git --depth 1 -b main $FEED_PATH/luci-app-podman
+          git clone https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git --depth 1 -b main $FEED_PATH/passwall-packages
+          git clone https://github.com/Openwrt-Passwall/openwrt-passwall.git --depth 1 -b main $FEED_PATH/passwall
           
           echo "src-link custom $FEED_PATH" >> $BUILD_PATH/feeds.conf.default
 
@@ -99,7 +99,7 @@ jobs:
           # 安装 feeds
           cd $BUILD_PATH
           ./scripts/feeds update -a
-          ./scripts/feeds install -a -f
+          ./scripts/feeds install -a -f -p custom
 
           echo "status=success" >> $GITHUB_OUTPUT
 
@@ -137,7 +137,6 @@ jobs:
           # 最新源码
           cat $PATCH_PATH/podman > $PKG_PATH/utils/podman/Makefile
           cat $PATCH_PATH/podman-patch > $PKG_PATH/utils/podman/patches/010-do-not-build-docs.patch
-          cat $PATCH_PATH/xray-core > $PKG_PATH/net/xray-core/Makefile
 
           # golang 1.26.x
           rm -rf "$PKG_PATH/lang/golang"
@@ -303,10 +302,9 @@ jobs:
           - 🏠 **后台地址**: `192.168.100.1`
           - 👤 **用户名**: `root`
           - 🔑 **密码**: `admin`
-          - 🔑 **固件空间**: 1024 MB
           - 📱 **移动网络支持**: [QModem](https://github.com/FUjr/QModem)
           - 🚢 **容器支持**：[luci-app-podman](https://github.com/Zerogiven-OpenWRT-Packages/luci-app-podman)
-          - 🦽 **其他软件包**：[passwall2](https://github.com/Openwrt-Passwall/openwrt-passwall2)、UPnP
+          - 🦽 **其他软件包**：[passwall](https://github.com/Openwrt-Passwall/openwrt-passwall)、UPnP
           EOF
 
           echo "release_tag=Hiveton-H5000M-$(date +"%Y.%m.%d")" >> $GITHUB_OUTPUT
