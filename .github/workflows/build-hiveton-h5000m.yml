@@ -91,7 +91,7 @@ jobs:
           git clone https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git --depth 1 -b main $FEED_PATH/passwall-packages
           git clone https://github.com/Openwrt-Passwall/openwrt-passwall.git --depth 1 -b main $FEED_PATH/passwall
           
-          echo "src-link custom $FEED_PATH" >> $BUILD_PATH/feeds.conf.default
+          sed -i "1i src-link custom $FEED_PATH" $BUILD_PATH/feeds.conf.default
 
           # adjust qmodem
           rm -rf "$BUILD_PATH/package/mtk/applications/5g-modem"
@@ -99,7 +99,7 @@ jobs:
           # 安装 feeds
           cd $BUILD_PATH
           ./scripts/feeds update -a
-          ./scripts/feeds install -a -f -p custom
+          ./scripts/feeds install -af
 
           echo "status=success" >> $GITHUB_OUTPUT
 
