@@ -89,7 +89,8 @@ jobs:
           git clone https://github.com/FUjr/QModem.git --depth 1 -b main $FEED_PATH/qmodem
           git clone https://github.com/Zerogiven-OpenWRT-Packages/luci-app-podman.git --depth 1 -b main $FEED_PATH/luci-app-podman
           git clone https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git --depth 1 -b main $FEED_PATH/passwall-packages
-          git clone https://github.com/Openwrt-Passwall/openwrt-passwall.git --depth 1 -b main $FEED_PATH/passwall
+          git clone https://github.com/Openwrt-Passwall/openwrt-passwall2.git --depth 1 -b main $FEED_PATH/passwall2
+          git clone https://github.com/vernesong/OpenClash.git --depth 1 -b master $FEED_PATH/openclash
           
           sed -i "1i src-link custom $FEED_PATH" $BUILD_PATH/feeds.conf.default
 
@@ -150,6 +151,13 @@ jobs:
           CUSTOM_PATH="$BUILD_PATH/files"
           mkdir -p "$CUSTOM_PATH/etc/uci-defaults"
           cp "${{ github.workspace }}/scripts/99-custom.sh" "$CUSTOM_PATH/etc/uci-defaults"
+
+          # 为 openclash 添加文件
+          mkdir -p "$CUSTOM_PATH/etc/openclash/core"
+          curl -L https://raw.githubusercontent.com/vernesong/OpenClash/core/master/meta/clash-linux-arm64.tar.gz | tar xOvz > "$CUSTOM_PATH/etc/openclash/core/clash_meta"
+          chmod +x "$CUSTOM_PATH/etc/openclash/core/clash_meta"
+          curl -o "$CUSTOM_PATH/etc/openclash/GeoIP.dat" https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
+          curl -o "$CUSTOM_PATH/etc/openclash/GeoSite.dat" https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat
 
           echo "status=success" >> $GITHUB_OUTPUT
           
