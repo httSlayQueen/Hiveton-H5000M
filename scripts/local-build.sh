@@ -30,7 +30,8 @@ HOMEPROXY_REPO_BRANCH="${HOMEPROXY_REPO_BRANCH:-master}"
 HOMEPROXY_FALLBACK_REPO_URL="${HOMEPROXY_FALLBACK_REPO_URL:-https://github.com/VIKINGYFY/homeproxy}"
 HOMEPROXY_FALLBACK_REPO_BRANCH="${HOMEPROXY_FALLBACK_REPO_BRANCH:-main}"
 ADBYBY_PLUS_I18N_IPK_URL="${ADBYBY_PLUS_I18N_IPK_URL:-https://github.com/kongfl888/luci-app-adbyby-plus-lite/releases/download/2.0K5/luci-i18n-adbyby-plus-zh-cn_221024.22052_all.ipk}"
-ADGUARDHOME_I18N_IPK_URL="${ADGUARDHOME_I18N_IPK_URL:-https://github.com/kongfl888/luci-app-adguardhome/releases/download/v1.8-20221120/luci-i18n-adguardhome-zh-cn_git-22.323.68542-450e04a_all.ipk}"
+ADGUARDHOME_IPK_URL="${ADGUARDHOME_IPK_URL:-https://github.com/sirpdboy/luci-app-adguardhome/releases/download/v1.1.1/luci-app-adguardhome_1.1.1-r1_all.ipk}"
+ADGUARDHOME_I18N_IPK_URL="${ADGUARDHOME_I18N_IPK_URL:-https://github.com/sirpdboy/luci-app-adguardhome/releases/download/v1.1.1/luci-i18n-adguardhome-zh-cn_0_all.ipk}"
 
 ENABLE_ADGUARDHOME="${ENABLE_ADGUARDHOME:-false}"
 ENABLE_OPENCLASH="${ENABLE_OPENCLASH:-false}"
@@ -788,6 +789,81 @@ endef
 EOF
 }
 
+# Like ensure_prebuilt_luci_i18n_package but for a main LuCI app package whose
+# ipk we want to ship without compiling from source. The CATEGORY/SUBMENU
+# are LuCI/Applications instead of LuCI/Translations and the package does not
+# depend on the i18n shim - the i18n is wired up via a separate call. The
+# ipk URL is treated as an upstream tarball/zip (sirpdboy/luci-app-adguardhome
+# releases serve an extra gzip-wrapped ipk whose layout matches
+# tar/debian-binary+control.tar.gz+data.tar.gz, so the same ar-or-tar branch
+# from the i18n helper is reused). PKG_HASH is skipped because the release
+# tag is the integrity anchor; if you need checksum pinning, set
+# ADGUARDHOME_IPK_SHA256SUM in the environment.
+ensure_prebuilt_luci_app_package() {
+  local pkg_name="$1"
+  local version="$2"
+  local ipk_url="$3"
+  local title="$4"
+  local source_name="${ipk_url##*/}"
+  local pkg_dir="package/prebuilt-luci-app/$pkg_name"
+  local source_urls
+
+  source_urls="$(github_url_base_candidates "$ipk_url" "$source_name" | tr '\n' ' ')"
+  rm -rf "$pkg_dir"
+  mkdir -p "$pkg_dir"
+
+  cat > "$pkg_dir/Makefile" <<EOF
+include \$(TOPDIR)/rules.mk
+
+PKG_NAME:=$pkg_name
+PKG_VERSION:=$version
+PKG_RELEASE:=1
+PKG_SOURCE:=$source_name
+PKG_SOURCE_URL:=$source_urls
+PKG_HASH:=skip
+PKG_BUILD_DIR:=\$(BUILD_DIR)/\$(PKG_NAME)-\$(PKG_VERSION)
+
+include \$(INCLUDE_DIR)/package.mk
+
+define Package/$pkg_name
+  SECTION:=luci
+  CATEGORY:=LuCI
+  SUBMENU:=Applications
+  TITLE:=$title
+  DEPENDS:=+libc +ca-certs +curl +luci-lua-runtime
+  PKGARCH:=all
+endef
+
+define Build/Prepare
+	rm -rf \$(PKG_BUILD_DIR)
+	mkdir -p \$(PKG_BUILD_DIR)/ipk \$(PKG_BUILD_DIR)/data
+	if ar t \$(DL_DIR)/\$(PKG_SOURCE) >/dev/null 2>&1; then \
+		(cd \$(PKG_BUILD_DIR)/ipk; ar x \$(DL_DIR)/\$(PKG_SOURCE)); \
+	else \
+		tar -xf \$(DL_DIR)/\$(PKG_SOURCE) -C \$(PKG_BUILD_DIR)/ipk; \
+	fi
+	if [ -f \$(PKG_BUILD_DIR)/ipk/data.tar.gz ]; then \
+		tar -xzf \$(PKG_BUILD_DIR)/ipk/data.tar.gz -C \$(PKG_BUILD_DIR)/data; \
+	elif [ -f \$(PKG_BUILD_DIR)/ipk/data.tar.xz ]; then \
+		tar -xJf \$(PKG_BUILD_DIR)/ipk/data.tar.xz -C \$(PKG_BUILD_DIR)/data; \
+	elif [ -f \$(PKG_BUILD_DIR)/ipk/data.tar.zst ]; then \
+		tar --zstd -xf \$(PKG_BUILD_DIR)/ipk/data.tar.zst -C \$(PKG_BUILD_DIR)/data; \
+	else \
+		echo "Unsupported ipk data archive for \$(PKG_SOURCE)" >&2; exit 1; \
+	fi
+endef
+
+define Build/Compile
+endef
+
+define Package/$pkg_name/install
+	\$(CP) \$(PKG_BUILD_DIR)/data/. \$(1)/
+endef
+
+\$(eval \$(call BuildPackage,$pkg_name))
+EOF
+}
+
 ensure_external_luci_i18n_packages() {
   is_true "$ENABLE_ADBYBY_PLUS" && ensure_prebuilt_luci_i18n_package \
     luci-i18n-adbyby-plus-zh-cn \
@@ -796,12 +872,24 @@ ensure_external_luci_i18n_packages() {
     luci-app-adbyby-plus \
     "Adbyby Plus Chinese translation"
 
-  is_true "$ENABLE_ADGUARDHOME" && ensure_prebuilt_luci_i18n_package \
-    luci-i18n-adguardhome-zh-cn \
-    git-22.323.68542-450e04a \
-    "$ADGUARDHOME_I18N_IPK_URL" \
-    luci-app-adguardhome \
-    "AdGuardHome Chinese translation"
+  if is_true "$ENABLE_ADGUARDHOME"; then
+    # sirpdboy/luci-app-adguardhome v1.1.1 ships as two prebuilt ipks (main
+    # app + zh-cn translation). Both releases are gzip-wrapped tarballs
+    # (debian-binary + control.tar.gz + data.tar.gz), which the
+    # ensure_prebuilt_*_package helpers already accept via the
+    # ar-or-tar fallback in Build/Prepare.
+    ensure_prebuilt_luci_app_package \
+      luci-app-adguardhome \
+      "1.1.1-r1" \
+      "$ADGUARDHOME_IPK_URL" \
+      "LuCI support for AdGuardHome"
+    ensure_prebuilt_luci_i18n_package \
+      luci-i18n-adguardhome-zh-cn \
+      "0" \
+      "$ADGUARDHOME_I18N_IPK_URL" \
+      luci-app-adguardhome \
+      "AdGuardHome Simplified Chinese translation"
+  fi
 }
 
 patch_qmodem_depends() {
@@ -1019,9 +1107,10 @@ apply_package_fixes() {
   fi
 
   if is_true "$ENABLE_ADGUARDHOME"; then
-    [ ! -d "package/luci-app-adguardhome" ] && git_clone_retry https://github.com/kongfl888/luci-app-adguardhome.git "" package/luci-app-adguardhome 1
-    local agh_script="package/luci-app-adguardhome/root/usr/share/AdGuardHome/links.sh"
-    [ -f "$agh_script" ] && sed -i 's|mv /usr/bin/AdGuardHome/AdGuardHome|rm -rf /usr/bin/AdGuardHome 2>/dev/null; mkdir -p /usr/bin/AdGuardHome; mv /tmp/AdGuardHomeupdate/AdGuardHome_linux_*/AdGuardHome|g' "$agh_script" || true
+    # luci-app-adguardhome is now shipped as a prebuilt ipk from
+    # sirpdboy/luci-app-adguardhome v1.1.1 (handled in
+    # ensure_external_luci_i18n_packages). Nothing else to do here.
+    :
   fi
 
   if is_true "$ENABLE_OPENCLASH"; then
@@ -1184,6 +1273,18 @@ install_selected_packages() {
   if is_true "$ENABLE_EASYMESH"; then
     feed_install_pkg mesh11sd
     feed_install_pkg wpad-mesh-openssl
+  fi
+
+  if is_true "$ENABLE_ADGUARDHOME"; then
+    # luci-app-adguardhome + luci-i18n-adguardhome-zh-cn live in the
+    # in-tree package/prebuilt-{luci-app,i18n}/ directories that
+    # ensure_external_luci_i18n_packages materialised. feeds install -f
+    # wires them into package/feeds/... so make defconfig / make world
+    # can resolve them.
+    require_package_file "AdGuardHome prebuilt app" "package/prebuilt-luci-app/luci-app-adguardhome/Makefile"
+    require_package_file "AdGuardHome prebuilt zh-cn" "package/prebuilt-i18n/luci-i18n-adguardhome-zh-cn/Makefile"
+    feed_install_pkg luci-app-adguardhome
+    feed_install_pkg luci-i18n-adguardhome-zh-cn
   fi
 
   if is_true "$ENABLE_MWAN3"; then
@@ -1475,6 +1576,7 @@ CONFIG_PACKAGE_kmod-inet-diag=y
 CONFIG_PACKAGE_kmod-nft-socket=y
 CONFIG_PACKAGE_kmod-nft-tproxy=y
 CONFIG_PACKAGE_kmod-tun=y
+CONFIG_PACKAGE_kmod-dummy=y
 EOF
   else
     disabled_pkgs+=("nikki" "luci-app-nikki" "luci-i18n-nikki-zh-cn" "luci-i18n-nikki-en")
@@ -1728,6 +1830,14 @@ EOF
   verify_enabled_pkg "OpenClash" "luci-app-openclash" "$ENABLE_OPENCLASH"
   verify_enabled_pkg "AdGuardHome" "luci-app-adguardhome" "$ENABLE_ADGUARDHOME"
   verify_enabled_pkg "AdGuardHome zh-cn" "luci-i18n-adguardhome-zh-cn" "$ENABLE_ADGUARDHOME"
+  # sirpdboy/luci-app-adguardhome is shipped as a prebuilt ipk. The Makefile
+  # that wraps it lives under package/prebuilt-luci-app/. If it is missing
+  # make defconfig will silently drop CONFIG_PACKAGE_luci-app-adguardhome=y
+  # and verify_enabled_pkg above will fail with no actionable cause.
+  if is_true "$ENABLE_ADGUARDHOME"; then
+    require_package_file "AdGuardHome prebuilt app" "package/prebuilt-luci-app/luci-app-adguardhome/Makefile"
+    require_package_file "AdGuardHome prebuilt zh-cn" "package/prebuilt-i18n/luci-i18n-adguardhome-zh-cn/Makefile"
+  fi
   verify_enabled_pkg "UPnP" "luci-app-upnp" "$ENABLE_UPNP"
   verify_enabled_pkg "UPnP zh-cn" "luci-i18n-upnp-zh-cn" "$ENABLE_UPNP"
   verify_enabled_pkg "UPnP miniupnpd" "miniupnpd-nftables" "$ENABLE_UPNP"
@@ -1812,7 +1922,6 @@ EOF
   verify_enabled_pkg "H5000M Connac interface" "kmod-connac_if" true
   verify_enabled_pkg "H5000M MT7992 chip driver" "kmod-mt7992" true
   verify_enabled_pkg "H5000M MT799A chip driver" "kmod-mt799a" true
-  verify_translation_file "AdGuardHome built-in zh-cn" "package/luci-app-adguardhome/po/zh-cn/AdGuardHome.po" "$ENABLE_ADGUARDHOME"
   verify_translation_file "OpenClash built-in zh-cn" "package/luci-app-openclash/po/zh-cn/openclash.zh-cn.po" "$ENABLE_OPENCLASH"
   verify_translation_file "Adbyby Plus built-in zh-cn" "package/luci-app-adbyby-plus/po/zh-cn/adbyby.po" "$ENABLE_ADBYBY_PLUS"
   verify_mtk_easymesh_assets
