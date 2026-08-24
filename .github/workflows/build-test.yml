@@ -78,6 +78,7 @@ on:
         required: false
         default: false
         type: boolean
+      enable_mwan3:
         description: '启用 MWAN3 MultiWAN Manager（多WAN负载均衡/故障切换）'
         required: false
         default: false
