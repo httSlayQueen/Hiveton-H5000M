@@ -48,7 +48,6 @@ base_env=(
   ENABLE_HOMEPROXY=false
   ENABLE_ADBYBY_PLUS=false
   ENABLE_ORIGINAL_MODEM=false
-  ENABLE_EASYMESH=true
   ENABLE_MWAN3=false
 )
 
@@ -130,7 +129,6 @@ run_named_profile() {
       run_profile all-compatible "$mode" \
         ENABLE_ADGUARDHOME=true ENABLE_OPENCLASH=true ENABLE_NIKKI=true ENABLE_UPNP=true \
         ENABLE_VLMCSD=true ENABLE_MOSDNS=true ENABLE_DOCKERMAN=true ENABLE_QMODEM_NEXT=true \
-        ENABLE_ORIGINAL_MODEM=false ENABLE_EASYMESH=true
       ;;
     dockerman)
       run_profile dockerman "$mode" \
@@ -144,7 +142,6 @@ run_named_profile() {
       run_profile all-compatible-mwan3 "$mode" \
         ENABLE_ADGUARDHOME=true ENABLE_OPENCLASH=true ENABLE_NIKKI=true ENABLE_UPNP=true \
         ENABLE_VLMCSD=true ENABLE_MOSDNS=true ENABLE_DOCKERMAN=true ENABLE_QMODEM_NEXT=true \
-        ENABLE_ORIGINAL_MODEM=false ENABLE_EASYMESH=true ENABLE_MWAN3=true
       ;;
     *)
       echo "Unknown coverage profile: $name" >&2

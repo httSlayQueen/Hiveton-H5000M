@@ -45,7 +45,6 @@ ENABLE_QMODEM="${ENABLE_QMODEM:-false}"
 ENABLE_HOMEPROXY="${ENABLE_HOMEPROXY:-false}"
 ENABLE_ADBYBY_PLUS="${ENABLE_ADBYBY_PLUS:-false}"
 ENABLE_ORIGINAL_MODEM="${ENABLE_ORIGINAL_MODEM:-false}"
-ENABLE_EASYMESH="${ENABLE_EASYMESH:-true}"
 ENABLE_MWAN3="${ENABLE_MWAN3:-false}"
 
 INSTALL_DEPS=false
@@ -147,6 +146,7 @@ WRAPPER
 }
 
 is_true() {
+  local status
   case "${1:-false}" in
     true|1|yes) status=0 ;;
     *) status=1 ;;
@@ -341,7 +341,6 @@ QModem=${ENABLE_QMODEM}
 HomeProxy=${ENABLE_HOMEPROXY}
 Adbyby Plus=${ENABLE_ADBYBY_PLUS}
 Original Modem=${ENABLE_ORIGINAL_MODEM}
-EasyMesh=${ENABLE_EASYMESH}
 MWAN3=${ENABLE_MWAN3}
 GOPROXY=${GOPROXY}
 GOSUMDB=${GOSUMDB}
@@ -434,117 +433,141 @@ fix_qmi_driver() {
   fi
 }
 
+# --- Go 1.24 compatibility -------------------------------------------------
+# The sbwml feed builds with Go 1.24 (see install_golang_feed). Its
+# mosdns/v2dat "update-dependencies" patches, however, bump go.mod to
+# `go 1.25.0` and pull in golang.org/x/sys v0.42.0 (whose go.mod declares
+# `go 1.25.0`), so they cannot build against the pinned Go 1.24 toolchain.
+#
+# Instead of hardcoding a long list of per-dependency version downgrades
+# (which silently no-op the moment sbwml bumps again), normalize the patches
+# at the source level and add a general, idempotent go.mod re-pin:
+#   - mosdns: drop the go.mod/go.sum hunks of the update-dependencies patch,
+#     keeping the upstream go.mod (already `go 1.24.x`) intact;
+#   - v2dat: keep the mmap-go addition (the perf patch code needs it) but
+#     rewrite the `go` directive and the golang.org/x/sys pin back to the last
+#     Go 1.24-compatible release (v0.37.0).
+# The Build/Prepare hook then re-pins `go`/`toolchain` with a general regex,
+# so a future upstream bump is neutralised instead of triggering an offline
+# toolchain auto-download. Each step verifies its output and fails loudly
+# rather than silently leaving a go 1.25+ module behind.
+
+strip_patch_file_diffs() {
+  local patch_file="$1"
+  local file_pattern="$2"
+  local tmp_patch
+  tmp_patch="$(mktemp)"
+  awk -v file_pattern="$file_pattern" '
+    function flush_section() {
+      if (in_section && keep_section) {
+        printf "%s", section_block
+      }
+      in_section=0
+      section_block=""
+      keep_section=0
+    }
+    /^diff --git / {
+      flush_section()
+      in_section=1
+      section_block=$0 ORS
+      keep_section=($0 !~ file_pattern)
+      next
+    }
+    /^--- a\// {
+      flush_section()
+      in_section=1
+      section_block=$0 ORS
+      keep_section=($0 !~ file_pattern)
+      next
+    }
+    in_section {
+      section_block=section_block $0 ORS
+      next
+    }
+    { print }
+    END {
+      flush_section()
+    }
+  ' "$patch_file" > "$tmp_patch"
+  mv "$tmp_patch" "$patch_file"
+}
+
+# Rewrite a patch so its `go` directive and golang.org/x/sys pin stay Go
+# 1.24-compatible, using general regexes (works for any future version bump).
+rewrite_patch_to_go124() {
+  local patch_file="$1"
+  [ -f "$patch_file" ] || return 0
+
+  # `+go 1.25.0` -> `+go 1.24.0` (added lines only, any patch version)
+  sed -E -i 's|^\+go [0-9]+\.[0-9]+(\.[0-9]+)?$|+go 1.24.0|' "$patch_file"
+  # golang.org/x/sys: any version -> v0.37.0 (last release declaring go 1.24)
+  sed -E -i \
+    -e 's|golang\.org/x/sys v[0-9]+\.[0-9]+\.[0-9]+ // indirect|golang.org/x/sys v0.37.0 // indirect|' \
+    -e 's|golang\.org/x/sys v[0-9]+\.[0-9]+\.[0-9]+ h1:[A-Za-z0-9+/=]+|golang.org/x/sys v0.37.0 h1:fdNQudmxPjkdUTPnLn5mdQv7Zwvbvpaxqs831goi9kQ=|' \
+    -e 's|golang\.org/x/sys v[0-9]+\.[0-9]+\.[0-9]+/go\.mod h1:[A-Za-z0-9+/=]+|golang.org/x/sys v0.37.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=|' \
+    "$patch_file"
+}
+
+# Idempotently set GO_MOD_ARGS and add a Build/Prepare that re-pins the
+# unpacked go.mod's `go`/`toolchain` directives to the pinned Go 1.24
+# toolchain (general regex, survives future upstream version bumps).
+ensure_go124_build_prepare() {
+  local makefile="$1"
+  local pkg_name="$2"
+  local marker="$3"
+  [ -f "$makefile" ] || return 0
+
+  sed -i '/^GO_MOD_ARGS[[:space:]]*[:+?]*=/d' "$makefile"
+  sed -i '/golang-package.mk/a GO_MOD_ARGS:= -mod=mod -modcacherw' "$makefile"
+
+  local tmp_makefile
+  tmp_makefile="$(mktemp)"
+  awk -v marker="$marker" '
+    /^define Build\/Prepare$/ { collecting=1; block=$0 ORS; next }
+    collecting {
+      block=block $0 ORS
+      if ($0 == "endef") {
+        if (block !~ marker) { printf "%s", block }
+        collecting=0; block=""
+      }
+      next
+    }
+    { print }
+    END { if (collecting && block !~ marker) printf "%s", block }
+  ' "$makefile" > "$tmp_makefile"
+  mv "$tmp_makefile" "$makefile"
+
+  tmp_makefile="$(mktemp)"
+  awk -v pkg="$pkg_name" -v marker="$marker" '
+    index($0, "$(eval $(call GoBinPackage," pkg ")") && !inserted {
+      print "define Build/Prepare"
+      print "\t$(call Build/Prepare/Default)"
+      print "\t# " marker
+      print "\tsed -i -E \047s|^go [0-9]+\\.[0-9]+(\\.[0-9]+)?$$|go 1.24.0|\047 $(PKG_BUILD_DIR)/go.mod"
+      print "\tsed -i -E \047s|^toolchain go[0-9]+\\.[0-9]+(\\.[0-9]+)?$$|toolchain go1.24.13|\047 $(PKG_BUILD_DIR)/go.mod"
+      print "endef"
+      print ""
+      inserted=1
+    }
+    { print }
+  ' "$makefile" > "$tmp_makefile"
+  mv "$tmp_makefile" "$makefile"
+}
+
 patch_v2dat_go124() {
   local patch_dir="package/mosdns/v2dat/patches"
   [ -d "$patch_dir" ] || return 0
 
-  strip_patch_file_diffs() {
-    local patch_file="$1"
-    local file_pattern="$2"
-    local tmp_patch
-    tmp_patch="$(mktemp)"
-    awk -v file_pattern="$file_pattern" '
-      function flush_section() {
-        if (in_section && keep_section) {
-          printf "%s", section_block
-        }
-        in_section=0
-        section_block=""
-        keep_section=0
-      }
-      /^diff --git / {
-        flush_section()
-        in_section=1
-        section_block=$0 ORS
-        keep_section=($0 !~ file_pattern)
-        next
-      }
-      /^--- a\// {
-        flush_section()
-        in_section=1
-        section_block=$0 ORS
-        keep_section=($0 !~ file_pattern)
-        next
-      }
-      in_section {
-        section_block=section_block $0 ORS
-        next
-      }
-      { print }
-      END {
-        flush_section()
-      }
-    ' "$patch_file" > "$tmp_patch"
-    mv "$tmp_patch" "$patch_file"
-  }
-
   local perf_patch="$patch_dir/102-perf-unpack-Use-memory-mapping-to-reduce-memory-usag.patch"
   if [ -f "$perf_patch" ]; then
-    log "Removing fragile v2dat go.mod/go.sum hunks from $(basename "$perf_patch")"
-    strip_patch_file_diffs "$perf_patch" '(^--- a/go[.](mod|sum)$| a/go[.](mod|sum) b/go[.](mod|sum)$)'
+    log "Normalizing v2dat perf patch to stay Go 1.24-compatible"
+    rewrite_patch_to_go124 "$perf_patch"
+    if grep -Eq '^\+go 1\.(2[5-9]|[3-9][0-9])' "$perf_patch"; then
+      die "v2dat perf patch still targets go >= 1.25 after normalization (upstream changed?)"
+    fi
   fi
 
-  local patch_files
-  patch_files="$(grep -RIl 'go 1\.25\.0\|go 1\.24\|golang.org/x/sys v0\.42\.0' "$patch_dir" || true)"
-  if [ -n "$patch_files" ]; then
-    printf '%s\n' "$patch_files" | xargs sed -i \
-      -e 's/go 1\.25\.0/go 1.24.0/g' \
-      -e 's|golang.org/x/sys v0\.42\.0 // indirect|golang.org/x/sys v0.37.0 // indirect|g' \
-      -e 's|golang.org/x/sys v0\.42\.0 h1:omrd2nAlyT5ESRdCLYdm3+fMfNFE/+Rf4bDIQImRJeo=|golang.org/x/sys v0.37.0 h1:fdNQudmxPjkdUTPnLn5mdQv7Zwvbvpaxqs831goi9kQ=|g' \
-      -e 's|golang.org/x/sys v0\.42\.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=|golang.org/x/sys v0.37.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=|g'
-  fi
-
-  local v2dat_makefile="package/mosdns/v2dat/Makefile"
-  if [ -f "$v2dat_makefile" ]; then
-    sed -i '/^GO_MOD_ARGS[[:space:]]*[:+?]*=/d' "$v2dat_makefile"
-    sed -i '/golang-package.mk/a GO_MOD_ARGS:= -mod=mod -modcacherw' "$v2dat_makefile"
-
-    local tmp_makefile
-    tmp_makefile="$(mktemp)"
-    awk '
-      /^define Build\/Prepare$/ {
-        collecting=1
-        block=$0 ORS
-        next
-      }
-      collecting {
-        block=block $0 ORS
-        if ($0 == "endef") {
-          if (block !~ /v2dat Go 1\.24 dependency compatibility/) {
-            printf "%s", block
-          }
-          collecting=0
-          block=""
-        }
-        next
-      }
-      { print }
-      END {
-        if (collecting && block !~ /v2dat Go 1\.24 dependency compatibility/) {
-          printf "%s", block
-        }
-      }
-    ' "$v2dat_makefile" > "$tmp_makefile"
-    mv "$tmp_makefile" "$v2dat_makefile"
-
-    tmp_makefile="$(mktemp)"
-    awk '
-      /^\$\(eval \$\(call GoBinPackage,v2dat\)\)/ && !inserted {
-        print "define Build/Prepare"
-        print "\t$(call Build/Prepare/Default)"
-        print "\t# v2dat Go 1.24 dependency compatibility"
-        print "\tsed -i -E \047s|^go 1\\.[0-9]+(\\.[0-9]+)?|go 1.24.0|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i -E \047s|^toolchain go1\\.[0-9]+(\\.[0-9]+)?|toolchain go1.24.13|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i \047s|golang.org/x/sys v0.42.0|golang.org/x/sys v0.37.0|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "endef"
-        print ""
-        inserted=1
-      }
-      { print }
-    ' "$v2dat_makefile" > "$tmp_makefile"
-    mv "$tmp_makefile" "$v2dat_makefile"
-  fi
-
+  ensure_go124_build_prepare "package/mosdns/v2dat/Makefile" "v2dat" "v2dat Go 1.24 compatibility"
   rm -f "$patch_dir/999-fix-go-version-for-go124.patch"
   rm -rf build_dir/target-*/v2dat-* 2>/dev/null || true
 }
@@ -554,76 +577,21 @@ patch_mosdns_go124() {
 
   local patch_dir="package/mosdns/mosdns/patches"
   [ -d "$patch_dir" ] || return 0
+
+  local deps_patch="$patch_dir/100-mosdns-update-dependencies.patch"
+  if [ -f "$deps_patch" ]; then
+    log "Stripping go.mod/go.sum hunks from mosdns update-dependencies patch"
+    strip_patch_file_diffs "$deps_patch" '(^--- a/go[.](mod|sum)$| a/go[.](mod|sum) b/go[.](mod|sum)$)'
+    if grep -Eq '^\+go 1\.(2[5-9]|[3-9][0-9])' "$deps_patch"; then
+      die "mosdns update-dependencies patch still bumps go.mod after strip (upstream changed?)"
+    fi
+  fi
+
+  ensure_go124_build_prepare "package/mosdns/mosdns/Makefile" "mosdns" "MosDNS Go 1.24 compatibility"
   rm -f "$patch_dir/999-fix-go-version-for-go124.patch"
-
-  local mosdns_makefile="package/mosdns/mosdns/Makefile"
-  if [ -f "$mosdns_makefile" ]; then
-    sed -i '/^GO_MOD_ARGS[[:space:]]*[:+?]*=/d' "$mosdns_makefile"
-    sed -i '/golang-package.mk/a GO_MOD_ARGS:= -mod=mod -modcacherw' "$mosdns_makefile"
-  fi
-  if [ -f "$mosdns_makefile" ]; then
-    local tmp_makefile
-    tmp_makefile="$(mktemp)"
-    awk '
-      /^define Build\/Prepare$/ {
-        collecting=1
-        block=$0 ORS
-        next
-      }
-      collecting {
-        block=block $0 ORS
-        if ($0 == "endef") {
-          if (block !~ /MosDNS Go 1\.24 dependency compatibility/) {
-            printf "%s", block
-          }
-          collecting=0
-          block=""
-        }
-        next
-      }
-      { print }
-      END {
-        if (collecting && block !~ /MosDNS Go 1\.24 dependency compatibility/) {
-          printf "%s", block
-        }
-      }
-    ' "$mosdns_makefile" > "$tmp_makefile"
-    mv "$tmp_makefile" "$mosdns_makefile"
-
-    tmp_makefile="$(mktemp)"
-    awk '
-      /^\$\(eval \$\(call GoBinPackage,mosdns\)\)/ && !inserted {
-        print "define Build/Prepare"
-        print "\t$(call Build/Prepare/Default)"
-        print "\t# MosDNS Go 1.24 dependency compatibility"
-        print "\tsed -i \047s|go 1\\.25\\.0|go 1.24.0|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i \047s|github.com/go-chi/chi/v5 v5.2.5|github.com/go-chi/chi/v5 v5.2.3|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i \047s|github.com/go-viper/mapstructure/v2 v2.5.0|github.com/go-viper/mapstructure/v2 v2.4.0|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i \047s|github.com/klauspost/compress v1.18.4|github.com/klauspost/compress v1.18.2|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i \047s|github.com/miekg/dns v1.1.72|github.com/miekg/dns v1.1.70|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i \047s|github.com/quic-go/quic-go v0.59.0|github.com/quic-go/quic-go v0.58.1|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i \047s|golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90|golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i \047s|golang.org/x/net v0.52.0|golang.org/x/net v0.48.0|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i \047s|golang.org/x/sync v0.20.0|golang.org/x/sync v0.19.0|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i \047s|golang.org/x/sys v0.42.0|golang.org/x/sys v0.40.0|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i \047s|golang.org/x/time v0.15.0|golang.org/x/time v0.14.0|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i \047s|github.com/mdlayher/netlink v1.9.0|github.com/mdlayher/netlink v1.8.0|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i \047s|github.com/prometheus/procfs v0.20.1|github.com/prometheus/procfs v0.19.2|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i \047s|go.yaml.in/yaml/v2 v2.4.4|go.yaml.in/yaml/v2 v2.4.3|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i \047s|golang.org/x/crypto v0.49.0|golang.org/x/crypto v0.46.0|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i \047s|golang.org/x/mod v0.34.0|golang.org/x/mod v0.32.0|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i \047s|golang.org/x/text v0.35.0|golang.org/x/text v0.33.0|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "\tsed -i \047s|golang.org/x/tools v0.43.0|golang.org/x/tools v0.40.0|g\047 $(PKG_BUILD_DIR)/go.mod"
-        print "endef"
-        print ""
-        inserted=1
-      }
-      { print }
-    ' "$mosdns_makefile" > "$tmp_makefile"
-    mv "$tmp_makefile" "$mosdns_makefile"
-  fi
   rm -rf build_dir/target-*/mosdns-* 2>/dev/null || true
 }
+
 
 patch_v2ray_geodata_downloads() {
   local geodata_makefile="package/v2ray-geodata/Makefile"
@@ -663,33 +631,60 @@ patch_mtwifi_apcli_bssid_budget() {
   fi
 }
 
-# mt_wifi7's sta_mgmt_assoc.c guards the easy-mesh / wpa_supplicant block as
-#   #if defined(CONFIG_MAP_SUPPORT) && defined(MTK_HOSTAPD_SUPPORT)
-# but reads pStaCfg->wpa_supplicant_info.WpaSupplicantUP inside, which only
-# exists in struct _STA_ADMIN_CONFIG when
-#   #ifdef RT_CFG80211_SUPPORT
-#   #if defined(CONFIG_STA_SUPPORT) || defined(APCLI_CFG80211_SUPPORT)
-# is satisfied (rtmp.h). When the project turns MTK_WIFI7_MAP_HOSTAPD_SUPPORT
-# on (EasyMesh full feature set) but leaves MT_STA_SUPPORT / APCLI_SUPPLICANT
-# disabled (default AP-only profile), MTK_HOSTAPD_SUPPORT is defined while
-# APCLI_CFG80211_SUPPORT is not - the struct member is absent and the build
-# fails with:
-#   error: 'struct _STA_ADMIN_CONFIG' has no member named 'wpa_supplicant_info'
-# Tighten the existing guard so the body only compiles when the struct
-# member is actually present. This is a no-op for the upstream target
-# (which always enables MT_STA_SUPPORT/APCLI_CFG80211_SUPPORT) and lets us
-# keep the full EasyMesh feature set on AP-only builds.
+# MTK HNAT (kmod-mediatek_hnat) offloads any TCP/UDP flow whose 5-tuple hits a
+# hardware FOE entry without first checking whether the destination IP is a
+# locally assigned address. For a wireless client the flow toward 192.168.6.1
+# (the router's own LAN IP) can therefore be turned into a LAN->WAN hardware
+# shortcut and forwarded by do_hnat_ge_to_ext()/dev_queue_xmit(), bypassing the
+# local INPUT chain. Symptom: enabling HNAT makes WiFi clients unable to reach
+# the LuCI/admin page even though wired LAN access keeps working.
+#
+# This patch adds a local-destination guard inside is_ppe_support_type(), the
+# single gate used by every pre-routing hook (IPv4/IPv6/bridge), so traffic
+# destined to a local address is never offloaded and instead follows the normal
+# INPUT path. Forwarded LAN<->WAN traffic is unaffected because its destination
+# is not RTN_LOCAL.
+patch_mtk_hnat_local_dest() {
+  local patch_file="$ROOT_DIR/patches/mtk-hnat-local-dest.patch"
+  local source_file="target/linux/mediatek/files-6.6/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c"
+  [ -f "$patch_file" ] || return 0
+  [ -f "$source_file" ] || { log "WARNING: HNAT source $source_file not found; skipping local-destination guard"; return 0; }
+
+  if grep -q 'Never offload flows destined to a locally' "$source_file"; then
+    log "MTK HNAT local-destination guard already applied"
+    return 0
+  fi
+
+  if patch -p1 --forward --dry-run < "$patch_file" >/dev/null 2>&1; then
+    log "Applying MTK HNAT local-destination guard"
+    patch -p1 < "$patch_file"
+  elif patch -p1 --reverse --dry-run < "$patch_file" >/dev/null 2>&1; then
+    log "MTK HNAT local-destination guard already applied"
+  else
+    die "Unable to apply MTK HNAT local-destination guard patch (upstream driver changed?)"
+  fi
+
+  grep -q 'inet_addr_type(&init_net, iph->daddr) == RTN_LOCAL' "$source_file" || \
+    die "MTK HNAT local-destination guard patch verification failed"
+}
+
+# mt_wifi7's sta_mgmt_assoc.c references pStaCfg->wpa_supplicant_info in the
+# MTK hostapd block; that struct member only exists when APCLI_CFG80211_SUPPORT
+# (or CONFIG_STA_SUPPORT) is defined (rtmp.h). Upstream now wraps every
+# wpa_supplicant_info access in `#ifdef APCLI_CFG80211_SUPPORT`. Older
+# checkouts required a build-time sed for this; the current driver already
+# ships the guard, so this is now a verify-only check that fails loudly (via
+# the compile error) if a future upstream change removes it.
 patch_mtwifi7_sta_mgmt_assoc_hostapd_guard() {
   local f="package/mtk/drivers/mt_wifi7/src/mt_wifi/common/fsm/sta_mgmt_assoc.c"
   [ -f "$f" ] || return 0
 
-  if grep -q '#if defined(CONFIG_MAP_SUPPORT) && defined(MTK_HOSTAPD_SUPPORT) && defined(APCLI_CFG80211_SUPPORT)' "$f"; then
-    log "mt_wifi7 sta_mgmt_assoc.c APCLI_CFG80211 hostapd guard already applied"
+  if grep -q '#ifdef APCLI_CFG80211_SUPPORT' "$f"; then
+    log "mt_wifi7 sta_mgmt_assoc.c wpa_supplicant_info guarded by APCLI_CFG80211_SUPPORT"
     return 0
   fi
 
-  log "Tightening mt_wifi7 sta_mgmt_assoc.c MTK_HOSTAPD guard with APCLI_CFG80211_SUPPORT"
-  sed -i 's|#if defined(CONFIG_MAP_SUPPORT) && defined(MTK_HOSTAPD_SUPPORT)|#if defined(CONFIG_MAP_SUPPORT) \&\& defined(MTK_HOSTAPD_SUPPORT) \&\& defined(APCLI_CFG80211_SUPPORT)|g' "$f"
+  log "WARNING: $f is missing the APCLI_CFG80211_SUPPORT guard; AP-only build may fail"
 }
 
 patch_mtk_wifi_utility_rbus_for_h5000m() {
@@ -1081,6 +1076,7 @@ apply_package_fixes() {
   patch_mtk_wifi_utility_rbus_for_h5000m
   patch_mtwifi_apcli_bssid_budget
   verify_mtwifi_patch
+  patch_mtk_hnat_local_dest
   patch_mtwifi7_sta_mgmt_assoc_hostapd_guard
   ensure_external_luci_i18n_packages
   patch_qmodem_depends
@@ -1157,10 +1153,6 @@ apply_package_fixes() {
     fi
     [ -f "package/luci-app-homeproxy/Makefile" ] || die "luci-app-homeproxy repository layout changed"
     patch_homeproxy_no_wan_default_interface
-  fi
-
-  if is_true "$ENABLE_EASYMESH"; then
-    require_package_file "EasyMesh mesh11sd" "package/feeds/routing/mesh11sd/Makefile"
   fi
 
   rm -rf package/feeds/packages/{exim,onionshare-cli,python-zope-event,python-zope-interface,python-gevent,python-twisted} 2>/dev/null || true
@@ -1270,11 +1262,6 @@ install_selected_packages() {
     require_package_file "HomeProxy sing-box" "package/feeds/packages/sing-box/Makefile"
   fi
 
-  if is_true "$ENABLE_EASYMESH"; then
-    feed_install_pkg mesh11sd
-    feed_install_pkg wpad-mesh-openssl
-  fi
-
   if is_true "$ENABLE_ADGUARDHOME"; then
     # luci-app-adguardhome + luci-i18n-adguardhome-zh-cn live in the
     # in-tree package/prebuilt-{luci-app,i18n}/ directories that
@@ -1335,47 +1322,6 @@ enable_upnp_stack_config() {
   config_enable PACKAGE_libmnl
   config_enable PACKAGE_libuuid
   config_enable PACKAGE_libnftnl
-}
-
-enable_easymesh_stack_config() {
-  # wpad-* are VARIANTs of the same hostapd source: only one TLS backend and
-  # one feature set can be selected. Disable every other combination so
-  # defconfig cannot silently pick mbedtls/wolfssl alongside openssl.
-  config_disable PACKAGE_wpad-basic-mbedtls
-  config_disable PACKAGE_wpad-basic-openssl
-  config_disable PACKAGE_wpad-basic-wolfssl
-  config_disable PACKAGE_wpad-mbedtls
-  config_disable PACKAGE_wpad-openssl
-  config_disable PACKAGE_wpad-wolfssl
-  config_disable PACKAGE_wpad-mesh-mbedtls
-  config_disable PACKAGE_wpad-mesh-wolfssl
-  config_enable PACKAGE_wpad-mesh-openssl
-  config_enable PACKAGE_mesh11sd
-  config_enable PACKAGE_kmod-cfg80211
-  config_enable PACKAGE_kmod-mac80211
-  config_enable PACKAGE_luci-app-mtwifi-cfg
-  config_enable PACKAGE_luci-i18n-mtwifi-cfg-zh-cn
-  config_enable PACKAGE_mtwifi-cfg
-  # MTK MT7992 MAP (Multi-AP / EasyMesh) kernel-side feature switches.
-  # The mt_wifi7 driver exposes them via PKG_KCONFIG (CONFIG_MTK_WIFI7_*).
-  # defconfig already enables MAP_SUPPORT (MAP R1); turning on R2..R6 plus
-  # VENDOR/HOSTAPD gives full EasyMesh certification features: backhaul
-  # steering, 6E MAP, vendor-specific MAP profile, and hostapd MAP R4/R5/R6
-  # message handling. These only affect mt_wifi7.kconfig, they do not change
-  # the kernel itself or the wpad selection.
-  config_enable MTK_WIFI7_MAP_SUPPORT
-  config_enable MTK_WIFI7_MAP_R2_VER_SUPPORT
-  config_enable MTK_WIFI7_MAP_R3_VER_SUPPORT
-  config_enable MTK_WIFI7_MAP_R4_VER_SUPPORT
-  config_enable MTK_WIFI7_MAP_R5_VER_SUPPORT
-  config_enable MTK_WIFI7_MAP_R2_6E_SUPPORT
-  config_enable MTK_WIFI7_MAP_R3_6E_SUPPORT
-  config_enable MTK_WIFI7_MAP_R6_SUPPORT
-  config_enable MTK_WIFI7_MAP_VENDOR_SUPPORT
-  config_enable MTK_WIFI7_MAP_HOSTAPD_SUPPORT
-  # Bridge netfilter is required for bridge-mode mesh forwarding and EAPOL
-  # relay used by 802.11s / EasyMesh.
-  config_enable PACKAGE_kmod-br-netfilter
 }
 
 # Enable the full MWAN3 stack: kernel netfilter modules, iptables userspace
@@ -1460,27 +1406,6 @@ enable_h5000m_wifi_driver_config() {
   config_enable PACKAGE_luci-app-mtwifi-cfg
   config_enable PACKAGE_luci-i18n-mtwifi-cfg-zh-cn
   config_enable PACKAGE_wireless-regdb
-}
-
-verify_mtk_easymesh_assets() {
-  if ! is_true "$ENABLE_EASYMESH"; then return 0; fi
-
-  local missing=0
-  local path
-  for path in \
-    package/mtk/drivers/mt_hwifi/src/mt_wifi/feature/map/map.c \
-    package/mtk/drivers/mt_hwifi/src/mt_wifi/profiles/mt7992/map_mt7992.dbdc.b0.dat \
-    package/mtk/drivers/mt_hwifi/src/mt_wifi/profiles/mt7992/map_mt7992.dbdc.b1.dat \
-    package/mtk/drivers/mt_wifi7/src/mt_wifi/feature/map/map.c \
-    package/mtk/drivers/mt_wifi7/src/mt_wifi/profiles/mt7992/map_mt7992.dbdc.b0.dat \
-    package/mtk/drivers/mt_wifi7/src/mt_wifi/profiles/mt7992/map_mt7992.dbdc.b1.dat; do
-    if [ ! -f "$path" ]; then
-      echo "EasyMesh/MTK MAP asset missing: $path" >&2
-      missing=1
-    fi
-  done
-
-  [ "$missing" -eq 0 ] || die "EasyMesh requested but MTK MT7992 MAP assets are incomplete"
 }
 
 diagnose_upnp_config() {
@@ -1584,32 +1509,6 @@ EOF
 
   is_true "$ENABLE_ADGUARDHOME" && { echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config; echo "CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y" >> .config; } || disabled_pkgs+=("luci-app-adguardhome" "luci-i18n-adguardhome-zh-cn")
   is_true "$ENABLE_OPENCLASH" && echo "CONFIG_PACKAGE_luci-app-openclash=y" >> .config || disabled_pkgs+=("luci-app-openclash")
-  if is_true "$ENABLE_EASYMESH"; then
-    cat >> .config <<'EOF'
-CONFIG_PACKAGE_mesh11sd=y
-CONFIG_PACKAGE_wpad-mesh-openssl=y
-CONFIG_PACKAGE_luci-app-mtwifi-cfg=y
-CONFIG_PACKAGE_luci-i18n-mtwifi-cfg-zh-cn=y
-CONFIG_PACKAGE_mtwifi-cfg=y
-# MTK MT7992 MAP (EasyMesh) feature switches: enable R1..R6 plus
-# vendor-specific and hostapd extensions so the MAP-certified feature set
-# compiles into mt7992.ko. Default mt7987_mt7992.config already selects
-# MAP_SUPPORT (R1); we expand it for full Multi-AP behavior.
-CONFIG_MTK_WIFI7_MAP_SUPPORT=y
-CONFIG_MTK_WIFI7_MAP_R2_VER_SUPPORT=y
-CONFIG_MTK_WIFI7_MAP_R3_VER_SUPPORT=y
-CONFIG_MTK_WIFI7_MAP_R4_VER_SUPPORT=y
-CONFIG_MTK_WIFI7_MAP_R5_VER_SUPPORT=y
-CONFIG_MTK_WIFI7_MAP_R6_SUPPORT=y
-CONFIG_MTK_WIFI7_MAP_R2_6E_SUPPORT=y
-CONFIG_MTK_WIFI7_MAP_R3_6E_SUPPORT=y
-CONFIG_MTK_WIFI7_MAP_VENDOR_SUPPORT=y
-CONFIG_MTK_WIFI7_MAP_HOSTAPD_SUPPORT=y
-# Bridge netfilter for 802.11s / EAPOL relay
-CONFIG_PACKAGE_kmod-br-netfilter=y
-EOF
-  else
-    disabled_pkgs+=("mesh11sd" "wpad-mesh-openssl")
   fi
   if is_true "$ENABLE_UPNP"; then
     cat >> .config <<'EOF'
@@ -1657,9 +1556,6 @@ EOF
 
   if is_true "$ENABLE_UPNP"; then
     enable_upnp_stack_config
-  fi
-  if is_true "$ENABLE_EASYMESH"; then
-    enable_easymesh_stack_config
   fi
   if is_true "$ENABLE_MWAN3"; then
     cat >> .config <<'EOF'
@@ -1788,10 +1684,6 @@ EOF
     enable_upnp_stack_config
   fi
 
-  if is_true "$ENABLE_EASYMESH"; then
-    enable_easymesh_stack_config
-  fi
-
   if is_true "$ENABLE_MWAN3"; then
     enable_mwan3_stack_config
   fi
@@ -1859,22 +1751,6 @@ EOF
   verify_enabled_pkg "HomeProxy nft tproxy" "kmod-nft-tproxy" "$ENABLE_HOMEPROXY"
   verify_enabled_pkg "Adbyby Plus" "luci-app-adbyby-plus" "$ENABLE_ADBYBY_PLUS"
   verify_enabled_pkg "Adbyby Plus zh-cn" "luci-i18n-adbyby-plus-zh-cn" "$ENABLE_ADBYBY_PLUS"
-  verify_enabled_pkg "EasyMesh mesh daemon" "mesh11sd" "$ENABLE_EASYMESH"
-  verify_enabled_pkg "EasyMesh wpad mesh" "wpad-mesh-openssl" "$ENABLE_EASYMESH"
-  verify_enabled_pkg "EasyMesh bridge netfilter" "kmod-br-netfilter" "$ENABLE_EASYMESH"
-  verify_enabled_pkg "EasyMesh MTK MT7992 driver" "kmod-mt7992" "$ENABLE_EASYMESH"
-  verify_enabled_pkg "EasyMesh MTK MT799A driver" "kmod-mt799a" "$ENABLE_EASYMESH"
-  if is_true "$ENABLE_EASYMESH"; then
-    verify_config_symbol "EasyMesh MTK MAP R1 base" "CONFIG_MTK_WIFI7_MAP_SUPPORT=y"
-    verify_config_symbol "EasyMesh MTK MAP R2" "CONFIG_MTK_WIFI7_MAP_R2_VER_SUPPORT=y"
-    verify_config_symbol "EasyMesh MTK MAP R3" "CONFIG_MTK_WIFI7_MAP_R3_VER_SUPPORT=y"
-    verify_config_symbol "EasyMesh MTK MAP R4" "CONFIG_MTK_WIFI7_MAP_R4_VER_SUPPORT=y"
-    verify_config_symbol "EasyMesh MTK MAP R5" "CONFIG_MTK_WIFI7_MAP_R5_VER_SUPPORT=y"
-    verify_config_symbol "EasyMesh MTK MAP R6" "CONFIG_MTK_WIFI7_MAP_R6_SUPPORT=y"
-    verify_config_symbol "EasyMesh MTK MAP vendor" "CONFIG_MTK_WIFI7_MAP_VENDOR_SUPPORT=y"
-    verify_config_symbol "EasyMesh MTK MAP hostapd" "CONFIG_MTK_WIFI7_MAP_HOSTAPD_SUPPORT=y"
-  fi
-  verify_enabled_pkg "MWAN3 core" "mwan3" "$ENABLE_MWAN3"
   verify_enabled_pkg "MWAN3 LuCI" "luci-app-mwan3" "$ENABLE_MWAN3"
   verify_enabled_pkg "MWAN3 zh-cn" "luci-i18n-mwan3-zh-cn" "$ENABLE_MWAN3"
   verify_enabled_pkg "MWAN3 ipset userspace" "ipset" "$ENABLE_MWAN3"
@@ -1924,7 +1800,6 @@ EOF
   verify_enabled_pkg "H5000M MT799A chip driver" "kmod-mt799a" true
   verify_translation_file "OpenClash built-in zh-cn" "package/luci-app-openclash/po/zh-cn/openclash.zh-cn.po" "$ENABLE_OPENCLASH"
   verify_translation_file "Adbyby Plus built-in zh-cn" "package/luci-app-adbyby-plus/po/zh-cn/adbyby.po" "$ENABLE_ADBYBY_PLUS"
-  verify_mtk_easymesh_assets
 }
 
 verify_enabled_pkg() {
@@ -2127,8 +2002,6 @@ collect_artifacts() {
     mtwifi-cfg \
     luci-app-mtwifi-cfg \
     luci-i18n-mtwifi-cfg-zh-cn \
-    mesh11sd \
-    wpad-mesh-openssl; do
     grep -q "^${image_pkg}[[:space:]-]" "$ARTIFACTS_DIR/openwrt-image.manifest" || \
       die "Firmware image manifest is missing required package: ${image_pkg}"
   done

@@ -22,7 +22,8 @@
 ├── feeds.conf.default                 # OpenWrt feeds 配置
 ├── h5000m.extra.config              # 追加到 .config 的本机特定配置
 ├── patches/
-│   └── mtwifi-apcli-active-only.patch # MTK WiFi AP/APCLI active-only 持久补丁
+│   ├── mtwifi-apcli-active-only.patch # MTK WiFi AP/APCLI active-only 持久补丁
+│   └── mtk-hnat-local-dest.patch      # MTK HNAT 本地地址不卸载补丁（修复 WiFi 访问后台）
 └── scripts/
     ├── local-build.sh                 # 本地/CI 共用的唯一构建入口
     ├── local-build.ps1               # Windows + WSL2 包装脚本
@@ -81,7 +82,6 @@ $env:ENABLE_QMODEM = 'false'
 $env:ENABLE_HOMEPROXY = 'true'
 $env:ENABLE_ADBYBY_PLUS = 'true'
 $env:ENABLE_ORIGINAL_MODEM = 'false'
-$env:ENABLE_EASYMESH = 'true'
 .\scripts\local-build.ps1
 ```
 
@@ -149,7 +149,6 @@ FULL_BUILD_PROFILE=proxy-stack PROFILE_SET=quick bash scripts/coverage-test.sh
 | `ENABLE_HOMEPROXY` | `false` | HomeProxy |
 | `ENABLE_ADBYBY_PLUS` | `false` | Adbyby Plus Lite |
 | `ENABLE_ORIGINAL_MODEM` | `false` | 上游原版 modem（与 QModem 互斥） |
-| `ENABLE_EASYMESH` | `true` | EasyMesh / 802.11s mesh 支持 |
 | `ENABLE_MWAN3` | `false` | MWAN3 MultiWAN Manager（多 WAN 负载均衡/故障切换，含 LuCI 界面、kmod-vrf 及全部 kmod-ipt-* 内核依赖） |
 
 ### 下载优化变量
@@ -238,31 +237,32 @@ Actions → Run workflow → `runner_type` 选 `self-hosted`（默认 `linux,x64
 - `netifd/mtwifi.sh` 中 `mtwifi_vif_ap_set_data` / `mtwifi_vif_sta_set_data` 对 `disabled="1"` 早退；
 - 应用方式：`local-build.sh` 在 `apply_package_fixes` 阶段对 `immortalwrt/` 执行幂等 forward / reverse dry-run；重复运行安全。
 
-其它内嵌修复：QMI WWAN 驱动适配 Linux 6.6、v2dat Go 1.24 兼容、Go feed 强制 `sbwml/packages_lang_golang -b 24.x`、`mihomo-meta` 冲突剥离、`ebtables` 源镜像在匹配到 netfilter URL 时才替换。
+`patches/mtk-hnat-local-dest.patch` 修复开启 HNAT 后 WiFi 客户端无法访问路由器后台（且无线本地流量被误卸载）的问题：
+
+- 在 `mtk_hnat` 驱动的 `is_ppe_support_type()` 里对 IPv4 / IPv6 增加"目的地址为本地地址（`RTN_LOCAL` / `ipv6_chk_addr`）则不卸载"的判断；
+- 该函数是 IPv4 / IPv6 / bridge 三个 pre-routing hook 的公共闸门，因此一处修复覆盖所有无线/有线入口，转发流量不受影响；
+- 应用方式同 `mtwifi` 补丁：`apply_package_fixes` 幂等 forward / reverse dry-run + `grep` 校验，重复运行安全。
+
+其它内嵌修复：QMI WWAN 驱动适配 Linux 6.6、Go feed 强制 `sbwml/packages_lang_golang -b 24.x`、`mihomo-meta` 冲突剥离、`ebtables` 源镜像在匹配到 netfilter URL 时才替换。MosDNS / v2dat 的 Go 1.24 兼容不再用逐条硬编码依赖版本降级：脚本会在补丁层归一化（mosdns 剥掉 update-dependencies 补丁里的 go.mod/go.sum hunk、v2dat 用通用正则把 `go` 指令与 `golang.org/x/sys` 固定回 Go 1.24 兼容版本），并在 `Build/Prepare` 里用通用正则重新钉住 `go`/`toolchain` 指令，上游再次升级版本时不会静默失效，而是被归一化或直接报错。
 
 插件源码修复：启用 Nikki 时会在 feed 更新失败/缺失后补拉 `nikkinikki-org/OpenWrt-nikki`，并校验 `nikki` / `mihomo-meta`；启用 OpenClash 时补拉 `vernesong/OpenClash` 内的 `luci-app-openclash`；启用 MosDNS 时补拉 `sbwml/luci-app-mosdns` 与 `sbwml/v2ray-geodata`，清理 feeds 内同名旧包，并校验 `mosdns` / `v2dat` / `v2ray-geoip` / `v2ray-geosite`；启用 HomeProxy 时补拉 `immortalwrt/homeproxy`，失败后回退到 `VIKINGYFY/homeproxy`，并强制校验 `luci-app-homeproxy` / `sing-box` / `kmod-nft-tproxy` 是否进入最终 `.config`。`luci-app-turboacc-mtk`（MTK HNAT / SFE / Shortcut-FE LuCI 面板）与 `luci-app-Airpifanctrl` 不在所用 feeds 中（immortalwrt 24.10 luci 与 immortalwrt-mt798x-24.10 上游分支都未携带），脚本会从 `hanwckf/immortalwrt-mt798x` 与 `padavanonly/immortalwrt-mt798x-6.6` 仓库拉取后拷贝到 `package/mtk/applications/` 下，并加上 verify 校验，避免 `.config` 静默丢失。
 
 UPnP 修复：`luci-app-upnp` 依赖虚拟包 `miniupnpd`，fw4 构建中显式选择 `miniupnpd-nftables` 与 `rpcd-mod-ucode`，避免 `defconfig` 将 `luci-app-upnp` 自动关闭。若上游源码引用 `libcrypt-compat` 但当前 feeds 未定义该包，构建脚本会补一个 glibc 条件下的兼容包定义，避免包扫描阶段刷屏 warning。
 
-EasyMesh / mesh 支持：上游 routing feed 的 `mesh11sd`（动态 802.11s mesh 配置守护进程）与 OpenWrt 内置 `wpad-mesh-openssl`（hostapd 变体）都可用；MTK MT7992 驱动源码含 `feature/map/map.c` 与 `map_mt7992.dbdc.{b0,b1}.dat` 等 MAP profile，`defconfig/mt7987_mt7992.config` 已经默认打开 `CONFIG_MTK_WIFI7_MAP_SUPPORT`。`ENABLE_EASYMESH=true` 时脚本会：
-
-- 用 `mesh11sd` + `wpad-mesh-openssl` 替换基础 `wpad`（禁用所有 basic/mbedtls/wolfssl 变体，避免 hostapd 同源冲突）；
-- 启用 MTK MT7992 MT7 的 MAP 套件：`MTK_WIFI7_MAP_SUPPORT`（R1）+ `MAP_R2..R6` + `MAP_VENDOR` + `MAP_HOSTAPD` + `MAP_R2/R3_6E`，让 MT7992.ko 编出完整 Multi-AP/EasyMesh 能力；
-- 启用 `kmod-br-netfilter`（802.11s / EAPOL relay 依赖）；
-- 校验 `mesh11sd` / `wpad-mesh-openssl` / `kmod-mt7992` / `kmod-mt799a` / `kmod-br-netfilter` / MTK `MTK_WIFI7_MAP_*` Kconfig 都进入 defconfig。
-
-注意：上游 ImmortalWrt 24.10 luci feed **没有** `luci-app-mesh11sd` 包。mesh11sd 的 UCI 配置通过 SSH 手动修改 `/etc/config/mesh11sd`，或下载第三方面板插件管理。
-
 MWAN3 多 WAN 支持：`ENABLE_MWAN3=true` 会同时启用 `mwan3` 后台、`luci-app-mwan3` 与中文包、`kmod-vrf`（同时设置 `CONFIG_KERNEL_NET_L3_MASTER_DEV=y` 解锁该内核符号，修复 LuCI 添加设备时提示需要 `kmod-vrf` 的问题），以及 `kmod-ipt-ipset` / `kmod-ipt-conntrack-extra` / `kmod-ipt-ipopt` / `kmod-ipt-raw` / `kmod-nf-conncount` 等内核模块和 `iptables-mod-conntrack-extra` / `iptables-mod-ipopt` / `ipset` 等用户态组件。这能避免运行时用 opkg 安装 `luci-app-mwan3` 时反复报 "依赖的软件包 kmod-ipt-* 在所有仓库都未提供"。所有 kmod 都在 image 构建时打入，不需要刷机后手动装。
 
 IPv6 基础设施：上游 `mt7987_mt7992.config` 默认开启了 `IPV6=y` 但保留 IPv6 netfilter 链路（kmod-ip6tables / kmod-ipt-nat6 / libip6tc / ip6tables-extra 等）全部 `is not set`。本项目同时启用 mwan3（v2.11.16 在 IPV6 模式会创建带 `-p ipv6-icmp --icmpv6-type 133/134/135/136/137` 的 mwan3_hook 链）和多代组件（Nikki / HomeProxy / MosDNS），若不补齐 IPv6 netfilter 栈，运行时会拿到 `can't initialize iptables table 'filter'+ 模块缺失` 以及 mwan3 IPv6 路径静默不生效。`h5000m.extra.config` 默认补齐 `kmod-nf-ipt6` / `kmod-ip6tables` / `kmod-ip6tables-extra` / `kmod-ipt-nat6` / `kmod-nf-nat6` / `kmod-ip6-tunnel` / `libip6tc` / `ip6tables-mod-nat` / `ip6tables-extra` / `ip6tables-nft` / `ip6tables-zz-legacy`，使 LAN/WAN IPv6 RA+DHCPv6、NDP、IPv6 NAT、fw4 IPv6 转发均能工作。
 
-MTK HNAT / 网络加速：MT798x 默认启用 `kmod-mediatek_hnat`（硬件 NAT offload），`mtk_hnat_nf_hook` 在 `NF_INET_PRE_ROUTING @ NF_IP_PRI_MANGLE-1` 与 `NF_INET_PRE_ROUTING @ NF_IP_PRI_FIRST+1` 等多个优先级点向 netfilter 注册 hook，在命中硬件流表时调用 `dev_queue_xmit` 直接转发，避免 fw4 / nftables 介入。这意味着：
+MTK HNAT / 网络加速：MT798x 默认启用 `kmod-mediatek_hnat`（硬件 NAT offload），`mtk_hnat_nf_hook` 在 `NF_INET_PRE_ROUTING @ NF_IP_PRI_MANGLE-1` 与 `NF_INET_PRE_ROUTING @ NF_IP_PRI_FIRST+1` 等多个优先级点向 netfilter 注册 hook，在命中硬件流表时调用 `dev_queue_xmit` 直接转发，避免 fw4 / nftables 介入。
+
+**本仓库已内置修复**：`patches/mtk-hnat-local-dest.patch` 在 `is_ppe_support_type()`（IPv4/IPv6/bridge 三个 pre-routing hook 的公共入口）里加入"目的地址是本地地址（`RTN_LOCAL`）就不卸载"的判断。这样发往路由器自身 IP（192.168.6.1）的流永远不会被 HNAT 变成 LAN→WAN 硬件捷径，而是正常走 INPUT 链。转发型 LAN↔WAN 流量不受影响（其目的地址不是 `RTN_LOCAL`）。`local-build.sh` 在 `apply_package_fixes` 阶段幂等应用并校验该补丁。
+
+修复前的问题表现：
 
 - **从 LAN（插线）访问路由器后台**（192.168.6.1）：包被识别为本地 INPUT，HNAT hook 返回 NF_ACCEPT，流走 INPUT 链。正常工作。
-- **从 WiFi 客户端访问路由器后台**（192.168.6.1）：如果 HNAT 已为该流（5 元组）生成过 hardware shortcut，第二次 SYN 会被 `do_hnat_ge_to_ext()` → `dev_queue_xmit()` 直接转走，跳过 INPUT 链。表现是 `curl http://192.168.6.1/` 超时/拒接、浏览器白页。
+- **从 WiFi 客户端访问路由器后台**（192.168.6.1）：HNAT 为该流（5 元组）生成 hardware shortcut 后，后续包被 `do_hnat_ge_to_ext()` → `dev_queue_xmit()` 直接转走，跳过 INPUT 链。表现是 `curl http://192.168.6.1/` 超时/拒接、浏览器白页，同时无线客户端侧的网络加速也可能把本地流量误卸载导致无线网络异常。
 
-`luci-app-turboacc-mtk` 面板中的"软件流卸载" / "HNAT"开关实际控制 UCI 选项转 sysfs 写入（`/sys/kernel/debug/hnat/`）。遇到上述现象时：在路由器后台 → 网络 → Turbo ACC → 取消启用 **Software flow offloading**（Shortcut-FE）和 **Hardware NAT**、点击 "Apply" 即可恢复。运行 `echo 0 > /sys/kernel/debug/hnat/hooks` 可以临时挂起 HNAT hook，不用重启服务。
+`luci-app-turboacc-mtk` 面板中的"软件流卸载" / "HNAT"开关实际控制 UCI 选项转 sysfs 写入（`/sys/kernel/debug/hnat/`）。若刷入的是未带本补丁的旧固件，临时规避方式：路由器后台 → 网络 → Turbo ACC → 取消启用 **Software flow offloading**（Shortcut-FE）和 **Hardware NAT** → "Apply"；或运行 `echo 0 > /sys/kernel/debug/hnat/hooks` 临时挂起 HNAT hook。
 
 ---
 

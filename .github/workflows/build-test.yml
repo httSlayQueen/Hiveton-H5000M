@@ -78,12 +78,6 @@ on:
         required: false
         default: false
         type: boolean
-      enable_easymesh:
-        description: '启用 EasyMesh / 802.11s Mesh 支持'
-        required: false
-        default: true
-        type: boolean
-      enable_mwan3:
         description: '启用 MWAN3 MultiWAN Manager（多WAN负载均衡/故障切换）'
         required: false
         default: false
@@ -152,7 +146,7 @@ jobs:
             [enable_adguardhome]=false [enable_openclash]=false [enable_nikki]=true
             [enable_upnp]=true [enable_vlmcsd]=true [enable_mosdns]=true [enable_dockerman]=false
             [enable_qmodem_next]=true [enable_qmodem]=false [enable_homeproxy]=false
-            [enable_adbyby_plus]=false [enable_original_modem]=false [enable_easymesh]=true
+            [enable_adbyby_plus]=false [enable_original_modem]=false 
             [enable_mwan3]=false
             [publish_release]=true [run_config_coverage]=false [coverage_profile_set]=quick
             [full_build_smoke_profile]=''
@@ -170,7 +164,7 @@ jobs:
             [enable_homeproxy]='${{ github.event.inputs.enable_homeproxy }}'
             [enable_adbyby_plus]='${{ github.event.inputs.enable_adbyby_plus }}'
             [enable_original_modem]='${{ github.event.inputs.enable_original_modem }}'
-            [enable_easymesh]='${{ github.event.inputs.enable_easymesh }}'
+            
             [enable_mwan3]='${{ github.event.inputs.enable_mwan3 }}'
             [publish_release]='${{ github.event.inputs.publish_release }}'
             [run_config_coverage]='${{ github.event.inputs.run_config_coverage }}'
@@ -237,7 +231,7 @@ jobs:
             [enable_adguardhome]=false [enable_openclash]=false [enable_nikki]=true
             [enable_upnp]=true [enable_vlmcsd]=true [enable_mosdns]=true [enable_dockerman]=false
             [enable_qmodem_next]=true [enable_qmodem]=false [enable_homeproxy]=false
-            [enable_adbyby_plus]=false [enable_original_modem]=false [enable_easymesh]=true
+            [enable_adbyby_plus]=false [enable_original_modem]=false 
             [enable_mwan3]=false
             [publish_release]=true
           )
@@ -254,7 +248,7 @@ jobs:
             [enable_homeproxy]='${{ github.event.inputs.enable_homeproxy }}'
             [enable_adbyby_plus]='${{ github.event.inputs.enable_adbyby_plus }}'
             [enable_original_modem]='${{ github.event.inputs.enable_original_modem }}'
-            [enable_easymesh]='${{ github.event.inputs.enable_easymesh }}'
+            
             [enable_mwan3]='${{ github.event.inputs.enable_mwan3 }}'
             [publish_release]='${{ github.event.inputs.publish_release }}'
           )
@@ -335,7 +329,6 @@ jobs:
           ENABLE_HOMEPROXY: ${{ steps.features.outputs.enable_homeproxy }}
           ENABLE_ADBYBY_PLUS: ${{ steps.features.outputs.enable_adbyby_plus }}
           ENABLE_ORIGINAL_MODEM: ${{ steps.features.outputs.enable_original_modem }}
-          ENABLE_EASYMESH: ${{ steps.features.outputs.enable_easymesh }}
           ENABLE_MWAN3: ${{ steps.features.outputs.enable_mwan3 }}
         run: |
           set -euo pipefail
@@ -389,7 +382,6 @@ jobs:
             - HomeProxy:   ${{ steps.features.outputs.enable_homeproxy }}
             - Adbyby Plus: ${{ steps.features.outputs.enable_adbyby_plus }}
             - 原版 Modem:  ${{ steps.features.outputs.enable_original_modem }}
-            - EasyMesh:    ${{ steps.features.outputs.enable_easymesh }}
             - MWAN3:       ${{ steps.features.outputs.enable_mwan3 }}
           prerelease: false
           make_latest: true
