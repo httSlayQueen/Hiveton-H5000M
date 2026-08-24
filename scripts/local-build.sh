@@ -1783,7 +1783,7 @@ EOF
 
   is_true "$ENABLE_ADGUARDHOME" && { echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config; echo "CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y" >> .config; } || disabled_pkgs+=("luci-app-adguardhome" "luci-i18n-adguardhome-zh-cn")
   is_true "$ENABLE_OPENCLASH" && echo "CONFIG_PACKAGE_luci-app-openclash=y" >> .config || disabled_pkgs+=("luci-app-openclash")
-  fi
+
   if is_true "$ENABLE_UPNP"; then
     cat >> .config <<'EOF'
 CONFIG_PACKAGE_luci-app-upnp=y
@@ -2290,9 +2290,9 @@ collect_artifacts() {
     kmod-mt799a \
     mtwifi-cfg \
     luci-app-mtwifi-cfg \
-    luci-i18n-mtwifi-cfg-zh-cn \
-    grep -q "^${image_pkg}[[:space:]-]" "$ARTIFACTS_DIR/openwrt-image.manifest" || \
-      die "Firmware image manifest is missing required package: ${image_pkg}"
+    luci-i18n-mtwifi-cfg-zh-cn; do
+    grep -q "^\${image_pkg}[[:space:]-]" "$ARTIFACTS_DIR/openwrt-image.manifest" || \
+      die "Firmware image manifest is missing required package: \${image_pkg}"
   done
 
   if is_true "$ENABLE_ADGUARDHOME" && ! grep -q '^luci-i18n-adguardhome-zh-cn[[:space:]-]' "$ARTIFACTS_DIR/openwrt-image.manifest"; then
