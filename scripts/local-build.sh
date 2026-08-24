@@ -435,7 +435,7 @@ fix_qmi_driver() {
 
 # --- Go 1.24 compatibility -------------------------------------------------
 # The sbwml feed builds with Go 1.24 (see install_golang_feed). Its
-# mosdns/v2dat "update-dependencies" patches, however, bump go.mod to
+# mosdns "update-dependencies" patches, however, bump go.mod to
 # `go 1.25.0` and pull in golang.org/x/sys v0.42.0 (whose go.mod declares
 # `go 1.25.0`), so they cannot build against the pinned Go 1.24 toolchain.
 #
@@ -444,9 +444,6 @@ fix_qmi_driver() {
 # at the source level and add a general, idempotent go.mod re-pin:
 #   - mosdns: drop the go.mod/go.sum hunks of the update-dependencies patch,
 #     keeping the upstream go.mod (already `go 1.24.x`) intact;
-#   - v2dat: keep the mmap-go addition (the perf patch code needs it) but
-#     rewrite the `go` directive and the golang.org/x/sys pin back to the last
-#     Go 1.24-compatible release (v0.37.0).
 # The Build/Prepare hook then re-pins `go`/`toolchain` with a general regex,
 # so a future upstream bump is neutralised instead of triggering an offline
 # toolchain auto-download. Each step verifies its output and fails loudly
@@ -554,27 +551,7 @@ ensure_go124_build_prepare() {
   mv "$tmp_makefile" "$makefile"
 }
 
-patch_v2dat_go124() {
-  local patch_dir="package/mosdns/v2dat/patches"
-  [ -d "$patch_dir" ] || return 0
-
-  local perf_patch="$patch_dir/102-perf-unpack-Use-memory-mapping-to-reduce-memory-usag.patch"
-  if [ -f "$perf_patch" ]; then
-    log "Normalizing v2dat perf patch to stay Go 1.24-compatible"
-    rewrite_patch_to_go124 "$perf_patch"
-    if grep -Eq '^\+go 1\.(2[5-9]|[3-9][0-9])' "$perf_patch"; then
-      die "v2dat perf patch still targets go >= 1.25 after normalization (upstream changed?)"
-    fi
-  fi
-
-  ensure_go124_build_prepare "package/mosdns/v2dat/Makefile" "v2dat" "v2dat Go 1.24 compatibility"
-  rm -f "$patch_dir/999-fix-go-version-for-go124.patch"
-  rm -rf build_dir/target-*/v2dat-* 2>/dev/null || true
-}
-
 patch_mosdns_go124() {
-  patch_v2dat_go124
-
   local patch_dir="package/mosdns/mosdns/patches"
   [ -d "$patch_dir" ] || return 0
 
@@ -949,6 +926,26 @@ patch_qmodem_depends() {
   log "qmodem Makefile patched successfully"
 }
 
+patch_qmodem_rmnet_nss_depends() {
+  # FUjr/QModem 的 rmnet-nss Makefile 里声明了 +kmod-qca-nss-drv，
+  # 但 OpenWrt 官方 feeds 与 immortalwrt-mt798x 仓库均未携带该包，
+  # package-metadata.pl 会反复报：
+  #   WARNING: Makefile '...' has a dependency on 'kmod-qca-nss-drv', which does not exist
+  # 该 dep 只在 Qualcomm IPQ 系列平台下使用，mt798x (Filogic) 用不到，直接剥离即可。
+  local nss_mf="package/feeds/qmodem/rmnet-nss/Makefile"
+  [ -f "$nss_mf" ] || return 0
+
+  if ! grep -q 'kmod-qca-nss-drv' "$nss_mf"; then
+    return 0
+  fi
+
+  log "Patching rmnet-nss Makefile: drop unresolved +kmod-qca-nss-drv dep"
+  cp -f "$nss_mf" "$nss_mf.orig"
+  sed -i 's/+\?kmod-qca-nss-drv//g' "$nss_mf"
+  rm -f "$nss_mf.orig"
+  log "rmnet-nss Makefile patched successfully"
+}
+
 patch_homeproxy_no_wan_default_interface() {
   local hp_client="package/luci-app-homeproxy/root/etc/homeproxy/scripts/generate_client.uc"
   [ -f "$hp_client" ] || return 0
@@ -1080,6 +1077,7 @@ apply_package_fixes() {
   patch_mtwifi7_sta_mgmt_assoc_hostapd_guard
   ensure_external_luci_i18n_packages
   patch_qmodem_depends
+  patch_qmodem_rmnet_nss_depends
 
   local ebtables_makefile="package/network/utils/ebtables/Makefile"
   if [ -f "$ebtables_makefile" ] && grep -qE 'git(://|s://git\.)netfilter\.org/ebtables' "$ebtables_makefile"; then
@@ -1297,7 +1295,6 @@ export MIHOMO_TCP_KEEPALIVE="1"\
   if is_true "$ENABLE_MOSDNS"; then
     require_package_file "MosDNS LuCI" "package/mosdns/luci-app-mosdns/Makefile"
     require_package_file "MosDNS core" "package/mosdns/mosdns/Makefile"
-    require_package_file "MosDNS v2dat" "package/mosdns/v2dat/Makefile"
     require_package_file "MosDNS v2ray geodata" "package/v2ray-geodata/Makefile"
   fi
 
@@ -1819,12 +1816,11 @@ EOF
 CONFIG_PACKAGE_luci-app-mosdns=y
 CONFIG_PACKAGE_luci-i18n-mosdns-zh-cn=y
 CONFIG_PACKAGE_mosdns=y
-CONFIG_PACKAGE_v2dat=y
 CONFIG_PACKAGE_v2ray-geoip=y
 CONFIG_PACKAGE_v2ray-geosite=y
 EOF
   else
-    disabled_pkgs+=("luci-app-mosdns" "luci-i18n-mosdns-zh-cn" "mosdns" "v2dat" "v2ray-geoip" "v2ray-geosite")
+    disabled_pkgs+=("luci-app-mosdns" "luci-i18n-mosdns-zh-cn" "mosdns" "v2ray-geoip" "v2ray-geosite")
   fi
   if is_true "$ENABLE_HOMEPROXY"; then
     cat >> .config <<'EOF'
@@ -1963,7 +1959,6 @@ EOF
     config_enable PACKAGE_luci-app-mosdns
     config_enable PACKAGE_luci-i18n-mosdns-zh-cn
     config_enable PACKAGE_mosdns
-    config_enable PACKAGE_v2dat
     config_enable PACKAGE_v2ray-geoip
     config_enable PACKAGE_v2ray-geosite
   fi
@@ -2027,7 +2022,6 @@ EOF
   verify_enabled_pkg "MosDNS" "luci-app-mosdns" "$ENABLE_MOSDNS"
   verify_enabled_pkg "MosDNS zh-cn" "luci-i18n-mosdns-zh-cn" "$ENABLE_MOSDNS"
   verify_enabled_pkg "MosDNS core" "mosdns" "$ENABLE_MOSDNS"
-  verify_enabled_pkg "MosDNS v2dat" "v2dat" "$ENABLE_MOSDNS"
   verify_enabled_pkg "MosDNS geoip" "v2ray-geoip" "$ENABLE_MOSDNS"
   verify_enabled_pkg "MosDNS geosite" "v2ray-geosite" "$ENABLE_MOSDNS"
   verify_enabled_pkg "DockerMan" "luci-app-dockerman" "$ENABLE_DOCKERMAN"
@@ -2215,28 +2209,8 @@ constexpr char S2C (char8_t const (\&s)[I])\
   fi
 }
 
-clean_v2dat_go_mod_cache() {
-  rm -rf \
-    dl/go-mod-cache/github.com/edsrzf/mmap-go@v1.2.0 \
-    dl/go-mod-cache/github.com/inconshreveable/mousetrap@v1.1.0 \
-    dl/go-mod-cache/github.com/spf13/cobra@v1.10.2 \
-    dl/go-mod-cache/github.com/spf13/pflag@v1.0.10 \
-    dl/go-mod-cache/go.uber.org/multierr@v1.11.0 \
-    dl/go-mod-cache/go.uber.org/zap@v1.27.1 \
-    dl/go-mod-cache/golang.org/x/sys@v0.37.0 \
-    dl/go-mod-cache/google.golang.org/protobuf@v1.36.11 2>/dev/null || true
-}
-
 clean_go_mod_cache() {
   rm -rf dl/go-mod-cache tmp/go-build 2>/dev/null || true
-}
-
-precompile_v2dat() {
-  ! is_true "$ENABLE_MOSDNS" && return 0
-  [ -d "package/mosdns/v2dat" ] || return 0
-  log "Precompiling MosDNS v2dat"
-  run_with_timeout "$V2DAT_TIMEOUT" "clean MosDNS v2dat" make -j"${THREADS}" package/mosdns/v2dat/clean V=s || true
-  run_with_timeout "$V2DAT_TIMEOUT" "compile MosDNS v2dat" make -j"${THREADS}" package/mosdns/v2dat/compile V=s
 }
 
 clean_v2ray_geodata_build() {
@@ -2256,7 +2230,6 @@ compile_firmware() {
 
   log "Cleaning Go module cache before Go package builds"
   clean_go_mod_cache
-  precompile_v2dat
   clean_v2ray_geodata_build
 
   local start_time end_time duration
@@ -2267,15 +2240,6 @@ compile_firmware() {
     echo "Build succeeded in ${duration}s"
   else
     echo "Parallel build failed; running focused diagnostics before single-thread retry"
-    if is_true "$ENABLE_MOSDNS"; then
-      grep -RIn 'go 1\.' package/mosdns/v2dat/patches || true
-      clean_v2dat_go_mod_cache
-      run_with_timeout "$V2DAT_TIMEOUT" "clean MosDNS v2dat diagnostics" make -j"${THREADS}" package/mosdns/v2dat/clean V=s || true
-      if ! run_with_timeout "$V2DAT_TIMEOUT" "compile MosDNS v2dat diagnostics" make -j"${THREADS}" package/mosdns/v2dat/compile V=s; then
-        find build_dir -path '*v2dat*/go.mod' -exec sh -c 'echo "--- $1"; sed -n "1,40p" "$1"' _ {} \; || true
-        die "MosDNS v2dat failed to compile"
-      fi
-    fi
     run_with_timeout "$COMPILE_TIMEOUT" "make firmware single-thread diagnostics" make FORCE=1 -j1 V=s
   fi
 }
