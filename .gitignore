@@ -1,5 +1,7 @@
 # ImmortalWrt 源码目录 (太大，不存入仓库)
 immortalwrt/
+immortalwrt-coverage/
+artifacts-coverage/
 
 # 编译产物
 artifacts/
