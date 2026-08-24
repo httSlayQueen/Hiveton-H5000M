@@ -1407,11 +1407,42 @@ enable_h5000m_wifi_driver_config() {
   config_enable PACKAGE_kmod-mt_wifi_cmn
   config_enable PACKAGE_kmod-mt_wifi7
   config_enable PACKAGE_kmod-mt_hwifi
+  # MTK HWIFI core configuration - aligned with upstream mt7987_mt7992.defconfig
   config_enable MTK_HWIFI_PCI_SUPPORT
   config_enable MTK_HWIFI_CONNAC_IF_SUPPORT
   config_enable MTK_HWIFI_WED_SUPPORT
   config_enable MTK_HWIFI_MT7992
   config_enable MTK_HWIFI_MT799A
+  # MT7992 specific tuning parameters (from upstream)
+  config_enable MTK_HWIFI_MT7992_RRO_MODE
+  config_enable MTK_HWIFI_MT7992_OPTION_TYPE
+  config_enable MTK_HWIFI_MT7992_INTR_OPTION_SET
+  # RX processing configuration
+  config_enable MTK_HWIFI_RX_PROCESS_WORKQUEUE
+  # MTK WIFI7 driver configuration - aligned with upstream
+  config_enable MTK_WIFI7_SUPPORT_OPENWRT
+  config_enable MTK_WIFI7_DRIVER
+  config_enable MTK_WIFI7_UNIFIED_COMMAND
+  config_enable MTK_WIFI7_DOT11_N_SUPPORT
+  config_enable MTK_WIFI7_DOT11_AX_SUPPORT
+  config_enable MTK_WIFI7_DOT11_BE_SUPPORT
+  config_enable MTK_WIFI7_MT_MAC
+  config_enable MTK_WIFI7_CHIP_MT7992
+  config_enable MTK_WIFI7_FIRST_IF_MT7992
+  config_enable MTK_WIFI7_SECOND_IF_MT7992
+  config_enable MTK_WIFI7_THIRD_IF_NONE
+  # WIFI7 feature switches
+  config_enable MTK_WIFI7_PROXYARP_SUPPORT
+  config_enable MTK_WIFI7_OFFCHANNEL_SUPPORT
+  config_enable MTK_WIFI7_BS_MAP_BL_SUPPORT
+  config_enable MTK_WIFI7_MULTI_INF_SUPPORT
+  config_enable MTK_WIFI7_BASIC_FUNC
+  config_enable MTK_WIFI7_DOT11_VHT_AC
+  config_enable MTK_WIFI7_DOT11_HE_AX
+  config_enable MTK_WIFI7_DOT11_EHT_BE
+  config_enable MTK_WIFI7_FIRST_IF_EEPROM_FLASH
+  # Wireless HNAT support for WIFI7
+  config_enable MTK_WIFI7_WHNAT_SUPPORT
   config_enable PACKAGE_kmod-mtk_pci
   config_enable PACKAGE_kmod-mtk_wed
   config_enable PACKAGE_kmod-connac_if
@@ -1483,11 +1514,42 @@ CONFIG_PACKAGE_blkid=y
 CONFIG_PACKAGE_kmod-mt_wifi_cmn=y
 CONFIG_PACKAGE_kmod-mt_wifi7=y
 CONFIG_PACKAGE_kmod-mt_hwifi=y
+# MTK HWIFI core configuration - aligned with upstream mt7987_mt7992.defconfig
 CONFIG_MTK_HWIFI_PCI_SUPPORT=y
 CONFIG_MTK_HWIFI_CONNAC_IF_SUPPORT=y
 CONFIG_MTK_HWIFI_WED_SUPPORT=y
 CONFIG_MTK_HWIFI_MT7992=y
 CONFIG_MTK_HWIFI_MT799A=y
+# MT7992 specific tuning parameters (from upstream)
+CONFIG_MTK_HWIFI_MT7992_RRO_MODE=4
+CONFIG_MTK_HWIFI_MT7992_OPTION_TYPE=0
+CONFIG_MTK_HWIFI_MT7992_INTR_OPTION_SET=0
+# RX processing configuration
+CONFIG_MTK_HWIFI_RX_PROCESS_WORKQUEUE=y
+# MTK WIFI7 driver configuration - aligned with upstream
+CONFIG_MTK_WIFI7_SUPPORT_OPENWRT=y
+CONFIG_MTK_WIFI7_DRIVER=y
+CONFIG_MTK_WIFI7_UNIFIED_COMMAND=y
+CONFIG_MTK_WIFI7_DOT11_N_SUPPORT=y
+CONFIG_MTK_WIFI7_DOT11_AX_SUPPORT=y
+CONFIG_MTK_WIFI7_DOT11_BE_SUPPORT=y
+CONFIG_MTK_WIFI7_MT_MAC=y
+CONFIG_MTK_WIFI7_CHIP_MT7992=y
+CONFIG_MTK_WIFI7_FIRST_IF_MT7992=y
+CONFIG_MTK_WIFI7_SECOND_IF_MT7992=y
+CONFIG_MTK_WIFI7_THIRD_IF_NONE=y
+# WIFI7 feature switches
+CONFIG_MTK_WIFI7_PROXYARP_SUPPORT=y
+CONFIG_MTK_WIFI7_OFFCHANNEL_SUPPORT=y
+CONFIG_MTK_WIFI7_BS_MAP_BL_SUPPORT=y
+CONFIG_MTK_WIFI7_MULTI_INF_SUPPORT=y
+CONFIG_MTK_WIFI7_BASIC_FUNC=y
+CONFIG_MTK_WIFI7_DOT11_VHT_AC=y
+CONFIG_MTK_WIFI7_DOT11_HE_AX=y
+CONFIG_MTK_WIFI7_DOT11_EHT_BE=y
+CONFIG_MTK_WIFI7_FIRST_IF_EEPROM_FLASH=y
+# Wireless HNAT support for WIFI7
+CONFIG_MTK_WIFI7_WHNAT_SUPPORT=m
 CONFIG_PACKAGE_kmod-mtk_pci=y
 CONFIG_PACKAGE_kmod-connac_if=y
 CONFIG_PACKAGE_kmod-mt7992=y
@@ -1813,11 +1875,26 @@ EOF
   verify_enabled_pkg "H5000M MT WiFi common" "kmod-mt_wifi_cmn" true
   verify_enabled_pkg "H5000M MT WiFi7 driver" "kmod-mt_wifi7" true
   verify_enabled_pkg "H5000M MT HWIFI driver" "kmod-mt_hwifi" true
+  # MTK HWIFI core configuration verification
   verify_config_symbol "H5000M HWIFI PCI support" "CONFIG_MTK_HWIFI_PCI_SUPPORT=y"
   verify_config_symbol "H5000M HWIFI CONNAC interface" "CONFIG_MTK_HWIFI_CONNAC_IF_SUPPORT=y"
   verify_config_symbol "H5000M HWIFI WED support" "CONFIG_MTK_HWIFI_WED_SUPPORT=y"
   verify_config_symbol "H5000M MT7992 Kconfig" "CONFIG_MTK_HWIFI_MT7992=y"
   verify_config_symbol "H5000M MT799A Kconfig" "CONFIG_MTK_HWIFI_MT799A=y"
+  # MT7992 specific tuning parameters (from upstream)
+  verify_config_symbol "H5000M MT7992 RRO mode" "CONFIG_MTK_HWIFI_MT7992_RRO_MODE=4"
+  verify_config_symbol "H5000M MT7992 option type" "CONFIG_MTK_HWIFI_MT7992_OPTION_TYPE=0"
+  verify_config_symbol "H5000M MT7992 interrupt option" "CONFIG_MTK_HWIFI_MT7992_INTR_OPTION_SET=0"
+  verify_config_symbol "H5000M RX process workqueue" "CONFIG_MTK_HWIFI_RX_PROCESS_WORKQUEUE=y"
+  # MTK WIFI7 driver configuration verification
+  verify_config_symbol "H5000M WIFI7 openwrt support" "CONFIG_MTK_WIFI7_SUPPORT_OPENWRT=y"
+  verify_config_symbol "H5000M WIFI7 driver support" "CONFIG_MTK_WIFI7_DRIVER=y"
+  verify_config_symbol "H5000M WIFI7 unified command" "CONFIG_MTK_WIFI7_UNIFIED_COMMAND=y"
+  verify_config_symbol "H5000M WIFI7 chip MT7992" "CONFIG_MTK_WIFI7_CHIP_MT7992=y"
+  verify_config_symbol "H5000M WIFI7 first if MT7992" "CONFIG_MTK_WIFI7_FIRST_IF_MT7992=y"
+  verify_config_symbol "H5000M WIFI7 second if MT7992" "CONFIG_MTK_WIFI7_SECOND_IF_MT7992=y"
+  verify_config_symbol "H5000M WIFI7 third if none" "CONFIG_MTK_WIFI7_THIRD_IF_NONE=y"
+  verify_config_symbol "H5000M WIFI7 WHNAT support" "CONFIG_MTK_WIFI7_WHNAT_SUPPORT=m"
   verify_enabled_pkg "H5000M MTK PCI driver" "kmod-mtk_pci" true
   verify_enabled_pkg "H5000M MTK WED driver" "kmod-mtk_wed" true
   verify_enabled_pkg "H5000M Connac interface" "kmod-connac_if" true
