@@ -534,21 +534,62 @@ ensure_go124_build_prepare() {
   ' "$makefile" > "$tmp_makefile"
   mv "$tmp_makefile" "$makefile"
 
+  # Build the Build/Prepare block as plain text via a quoted heredoc so that
+  # `$$`, `\047`, `\\.` etc. are preserved byte-for-byte with no shell/awk
+  # string escaping. We previously emitted this block via `awk 'print ...'`
+  # with three nested escape layers (`\047` for `'`, `\\.` for regex dot,
+  # bare `$$` for make's `$$`->`$` conversion) which on some CI runners
+  # (bash/awk/mawk version skew) produced a corrupted Makefile whose sed
+  # expression lacked the `$$` end anchor, leaving the replacement string
+  # glued to the pattern (symptom: `sed: char N: unterminated 's' command`).
+  local prepare_block
+  prepare_block="$(mktemp)"
+  cat > "$prepare_block" <<'PREP_EOF'
+
+define Build/Prepare
+	$(call Build/Prepare/Default)
+	# __MARKER__
+	sed -i -E 's|^go [0-9]+\.[0-9]+(\.[0-9]+)?$$|go 1.24.0|' $(PKG_BUILD_DIR)/go.mod
+	sed -i -E 's|^toolchain go[0-9]+\.[0-9]+(\.[0-9]+)?$$|toolchain go1.24.13|' $(PKG_BUILD_DIR)/go.mod
+endef
+PREP_EOF
+  # Substitute the marker sentinel with the actual marker text. Pick a
+  # delimiter that can't appear in any realistic marker string.
+  sed -i "s|__MARKER__|${marker}|" "$prepare_block"
+
+  # Insert the prepared block before the GoBinPackage eval line. The awk
+  # only does line matching + file reads — no string-escape acrobatics.
   tmp_makefile="$(mktemp)"
-  awk -v pkg="$pkg_name" -v marker="$marker" '
+  awk -v pkg="$pkg_name" -v block_file="$prepare_block" '
     index($0, "$(eval $(call GoBinPackage," pkg ")") && !inserted {
-      print "define Build/Prepare"
-      print "\t$(call Build/Prepare/Default)"
-      print "\t# " marker
-      print "\tsed -i -E \047s|^go [0-9]+\\.[0-9]+(\\.[0-9]+)?$$|go 1.24.0|\047 $(PKG_BUILD_DIR)/go.mod"
-      print "\tsed -i -E \047s|^toolchain go[0-9]+\\.[0-9]+(\\.[0-9]+)?$$|toolchain go1.24.13|\047 $(PKG_BUILD_DIR)/go.mod"
-      print "endef"
+      while ((getline line < block_file) > 0) print line
+      close(block_file)
       print ""
       inserted=1
     }
     { print }
   ' "$makefile" > "$tmp_makefile"
+  rm -f "$prepare_block"
   mv "$tmp_makefile" "$makefile"
+
+  # Defensive verification: catch environment-specific corruption early with
+  # a clear, actionable error instead of letting it surface hours later as a
+  # cryptic sed error inside make. We check three invariants:
+  #   1. marker comment is present (idempotency key)
+  #   2. literal `$$` end anchor is present (otherwise make would expand it
+  #      to `$` and we'd lose the regex anchor — but the *raw* file must
+  #      still contain `$$`, otherwise we know the heredoc was mangled)
+  #   3. no known-bad patterns leaked in (regex end anchor fell off and the
+  #      replacement glued itself onto the pattern)
+  if ! grep -qF "# ${marker}" "$makefile"; then
+    die "ensure_go124_build_prepare: marker '# ${marker}' missing in $makefile (Build/Prepare block not injected)"
+  fi
+  if ! grep -qF ')?$$|go 1.24.0|' "$makefile"; then
+    die "ensure_go124_build_prepare: literal '\$\$|go 1.24.0|' anchor missing in $makefile (heredoc/escape corruption?)"
+  fi
+  if grep -qF ')?go 1.24.0|' "$makefile"; then
+    die "ensure_go124_build_prepare: corrupted sed pattern detected in $makefile (CI env mangled the awk/heredoc output — please file a bug)"
+  fi
 }
 
 patch_mosdns_go124() {
