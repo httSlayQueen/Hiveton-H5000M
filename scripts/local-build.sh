@@ -1316,6 +1316,21 @@ config_enable() {
   fi
 }
 
+# Set a config symbol to a specific value (not just y/n). Useful for int/string
+# configs like CONFIG_MTK_HWIFI_MT7992_RRO_MODE=4.
+config_set_symbol() {
+  local symbol="$1"
+  local value="$2"
+  if grep -q "^CONFIG_${symbol}=" .config; then
+    sed -i "s|^CONFIG_${symbol}=.*|CONFIG_${symbol}=${value}|" .config
+  elif grep -q "^# CONFIG_${symbol} is not set" .config; then
+    sed -i "/^# CONFIG_${symbol} is not set/d" .config
+    echo "CONFIG_${symbol}=${value}" >> .config
+  else
+    echo "CONFIG_${symbol}=${value}" >> .config
+  fi
+}
+
 config_disable() {
   local symbol="$1"
   if ./scripts/config --file .config -d "$symbol" 2>/dev/null; then
@@ -1413,10 +1428,10 @@ enable_h5000m_wifi_driver_config() {
   config_enable MTK_HWIFI_WED_SUPPORT
   config_enable MTK_HWIFI_MT7992
   config_enable MTK_HWIFI_MT799A
-  # MT7992 specific tuning parameters (from upstream)
-  config_enable MTK_HWIFI_MT7992_RRO_MODE
-  config_enable MTK_HWIFI_MT7992_OPTION_TYPE
-  config_enable MTK_HWIFI_MT7992_INTR_OPTION_SET
+  # MT7992 specific tuning parameters (from upstream) - these need specific values, not just =y
+  config_set_symbol MTK_HWIFI_MT7992_RRO_MODE 4
+  config_set_symbol MTK_HWIFI_MT7992_OPTION_TYPE 0
+  config_set_symbol MTK_HWIFI_MT7992_INTR_OPTION_SET 0
   # RX processing configuration
   config_enable MTK_HWIFI_RX_PROCESS_WORKQUEUE
   # MTK WIFI7 driver configuration - fully aligned with upstream mt7987_mt7992.defconfig (110 config items)
@@ -1486,10 +1501,10 @@ enable_h5000m_wifi_driver_config() {
   config_enable MTK_WIFI7_MBSS_SUPPORT
   config_enable MTK_WIFI7_MCAST_RATE_SPECIFIC
   config_enable MTK_WIFI7_MLME_MULTI_QUEUE_SUPPORT
-  config_enable MTK_WIFI7_MODE_AP
-  config_enable MTK_WIFI7_MODE_BOTH
-  config_enable MTK_WIFI7_MODE_STA
-  config_enable MTK_WIFI7_MT_AP_SUPPORT
+  config_set_symbol MTK_WIFI7_MODE_AP m
+  config_set_symbol MTK_WIFI7_MODE_BOTH m
+  config_set_symbol MTK_WIFI7_MODE_STA m
+  config_set_symbol MTK_WIFI7_MT_AP_SUPPORT m
   config_enable MTK_WIFI7_MT_DFS_SUPPORT
   config_enable MTK_WIFI7_MULTI_PROFILE_SUPPORT
   config_enable MTK_WIFI7_MUMIMO_SUPPORT
@@ -1528,12 +1543,12 @@ enable_h5000m_wifi_driver_config() {
   config_enable MTK_WIFI7_WSC_V2_SUPPORT
   config_enable MTK_WIFI7_ZERO_PKT_LOSS_SUPPORT
   # MTK_WIFI7 module and path
-  config_enable MTK_WIFI7_MT_WIFI
-  config_enable MTK_WIFI7_MT_WIFI_PATH
-  config_enable MTK_WIFI7_FW_LOG_TYPE
-  config_enable MTK_WIFI7_SKU_TYPE
+  config_set_symbol MTK_WIFI7_MT_WIFI m
+  config_set_symbol MTK_WIFI7_MT_WIFI_PATH '"mt_wifi"'
+  config_set_symbol MTK_WIFI7_FW_LOG_TYPE '"idx_log"'
+  config_set_symbol MTK_WIFI7_SKU_TYPE '"BE5040"'
   # Wireless HNAT support for WIFI7
-  config_enable MTK_WIFI7_WHNAT_SUPPORT
+  config_set_symbol MTK_WIFI7_WHNAT_SUPPORT m
   config_enable PACKAGE_kmod-mtk_pci
   config_enable PACKAGE_kmod-mtk_wed
   config_enable PACKAGE_kmod-connac_if
