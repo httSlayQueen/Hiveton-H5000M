@@ -63,11 +63,11 @@ WSL2 是本地编译的推荐方式——原生 ext4 文件系统、无线程限
 
 ```powershell
 $env:ENABLE_MOSDNS = 'false'
-$env:ENABLE_QMODEM_NEXT = 'false'
+$env:ENABLE_ADBLOCK = 'true'
 .\scripts\local-build.ps1
 ```
 
-全兼容插件本地编译示例（互斥项中选择 QModem Next，不同时启用旧 QModem/原版 Modem）：
+全兼容插件本地编译示例（同时启用上游原版 Modem + Adblock，关闭 MosDNS 释放编译时间）：
 
 ```powershell
 $env:ENABLE_ADGUARDHOME = 'true'
@@ -116,7 +116,7 @@ PROFILE_SET=full bash scripts/coverage-test.sh
 FULL_BUILD_PROFILE=proxy-stack PROFILE_SET=quick bash scripts/coverage-test.sh
 ```
 
-`quick` 覆盖默认构建和代理栈组合；`full` 会额外覆盖最小系统、HomeProxy-only、MosDNS-only、Nikki-only、旧 QModem、原版 modem、常用可选服务、全兼容插件和 DockerMan。`FULL_BUILD_PROFILE` 会在配置覆盖后额外完整编译一个指定 profile。
+`quick` 覆盖默认构建和代理栈组合；`full` 会额外覆盖最小系统、HomeProxy-only、MosDNS-only、Nikki-only、原版 modem、Adblock、常用可选服务、全兼容插件和 DockerMan。`FULL_BUILD_PROFILE` 会在配置覆盖后额外完整编译一个指定 profile。
 
 成功后产物在 `artifacts/`，并打包成 `artifacts.tar.gz`。
 
@@ -141,15 +141,12 @@ FULL_BUILD_PROFILE=proxy-stack PROFILE_SET=quick bash scripts/coverage-test.sh
 | `ENABLE_UPNP` | `true` | UPnP IGD |
 | `ENABLE_VLMCSD` | `true` | KMS 激活服务 |
 | `ENABLE_MOSDNS` | `true` | MosDNS + v2ray-geodata |
-| `ENABLE_QMODEM_NEXT` | `true` | QModem Next (新版 5G/LTE) |
 | `ENABLE_ADGUARDHOME` | `false` | AdGuardHome |
 | `ENABLE_OPENCLASH` | `false` | OpenClash |
 | `ENABLE_DOCKERMAN` | `false` | DockerMan + dockerd |
-| `ENABLE_QMODEM` | `false` | 旧版 QModem（与 `_NEXT` 互斥） |
 | `ENABLE_HOMEPROXY` | `false` | HomeProxy |
-| `ENABLE_ADBYBY_PLUS` | `false` | Adbyby Plus Lite |
-| `ENABLE_ORIGINAL_MODEM` | `false` | 上游原版 modem（与 QModem 互斥） |
-| `ENABLE_MWAN3` | `false` | MWAN3 MultiWAN Manager（多 WAN 负载均衡/故障切换，含 LuCI 界面、kmod-vrf 及全部 kmod-ipt-* 内核依赖） |
+| `ENABLE_ORIGINAL_MODEM` | `true` | 上游原版 modem（luci-app-modem + ModemManager，支持 Quectel RG501Q-EU/RM5xxQ 等 QMI 5G 模块） |
+| `ENABLE_ADBLOCK` | `true` | Adblock（DNS 层广告/恶意域名过滤，依赖 dnsmasq/unbound/smartdns） |
 
 ### 下载优化变量
 
@@ -249,9 +246,11 @@ Actions → Run workflow → `runner_type` 选 `self-hosted`（默认 `linux,x64
 
 UPnP 修复：`luci-app-upnp` 依赖虚拟包 `miniupnpd`，fw4 构建中显式选择 `miniupnpd-nftables` 与 `rpcd-mod-ucode`，避免 `defconfig` 将 `luci-app-upnp` 自动关闭。若上游源码引用 `libcrypt-compat` 但当前 feeds 未定义该包，构建脚本会补一个 glibc 条件下的兼容包定义，避免包扫描阶段刷屏 warning。
 
-MWAN3 多 WAN 支持：`ENABLE_MWAN3=true` 会同时启用 `mwan3` 后台、`luci-app-mwan3` 与中文包、`kmod-vrf`（同时设置 `CONFIG_KERNEL_NET_L3_MASTER_DEV=y` 解锁该内核符号，修复 LuCI 添加设备时提示需要 `kmod-vrf` 的问题），以及 `kmod-ipt-ipset` / `kmod-ipt-conntrack-extra` / `kmod-ipt-ipopt` / `kmod-ipt-raw` / `kmod-nf-conncount` 等内核模块和 `iptables-mod-conntrack-extra` / `iptables-mod-ipopt` / `ipset` 等用户态组件。这能避免运行时用 opkg 安装 `luci-app-mwan3` 时反复报 "依赖的软件包 kmod-ipt-* 在所有仓库都未提供"。所有 kmod 都在 image 构建时打入，不需要刷机后手动装。
+原版 Modem（默认）：`ENABLE_ORIGINAL_MODEM=true` 启用上游 `luci-app-modem` + `modem` + `luci-i18n-modem-zh-cn`，底层走 `modemmanager` + `libqmi`，支持 Quectel RG501Q-EU/RM5xxQ 系列等所有 QMI 5G 模块（包括 USB/PCIe 双形态）。MTK `package/mtk/applications/5g-modem/quectel_QMI_WWAN` 等内核驱动模块已存在于 immortalwrt 源中，由 package-metadata 自动解析，无需额外 `src-git qmodem` feed。原先引入的 `FUjr/QModem` 私有源、其 `kmod-mhi-wwan-ctrl/mbim` 等不存在的 dep 补丁、以及 `patch_qmodem_*` 系列特殊修复全部移除。
 
-IPv6 基础设施：上游 `mt7987_mt7992.config` 默认开启了 `IPV6=y` 但保留 IPv6 netfilter 链路（kmod-ip6tables / kmod-ipt-nat6 / libip6tc / ip6tables-extra 等）全部 `is not set`。本项目同时启用 mwan3（v2.11.16 在 IPV6 模式会创建带 `-p ipv6-icmp --icmpv6-type 133/134/135/136/137` 的 mwan3_hook 链）和多代组件（Nikki / HomeProxy / MosDNS），若不补齐 IPv6 netfilter 栈，运行时会拿到 `can't initialize iptables table 'filter'+ 模块缺失` 以及 mwan3 IPv6 路径静默不生效。`h5000m.extra.config` 默认补齐 `kmod-nf-ipt6` / `kmod-ip6tables` / `kmod-ip6tables-extra` / `kmod-ipt-nat6` / `kmod-nf-nat6` / `kmod-ip6-tunnel` / `libip6tc` / `ip6tables-mod-nat` / `ip6tables-extra` / `ip6tables-nft` / `ip6tables-zz-legacy`，使 LAN/WAN IPv6 RA+DHCPv6、NDP、IPv6 NAT、fw4 IPv6 转发均能工作。
+Adblock（默认）：`ENABLE_ADBLOCK=true` 启用上游 `adblock` + `luci-app-adblock` + `luci-i18n-adblock-zh-cn`，再加 `enable_adblock_stack_config()` 显式声明全部运行时依赖（`jshn` / `jsonfilter` / `coreutils` / `coreutils-sort` / `gawk` / `ca-bundle` / `rpcd` / `rpcd-mod-rpcsys` / `curl` / `ca-certificates`），作为 defconfig 鲁棒性网。原先 `adbyby-plus` Lite 的 `kongfl888` 私有源克隆、`ADBYBY_PLUS_I18N_IPK_URL` 预编译 ipk 下载、`luci-app-adbyby-plus` + `ipset` 注入等全部移除。
+
+IPv6 基础设施：上游 `mt7987_mt7992.config` 默认开启了 `IPV6=y` 但保留 IPv6 netfilter 链路（kmod-ip6tables / kmod-ipt-nat6 / libip6tc / ip6tables-extra 等）全部 `is not set`。本项目同时启用多代组件（Nikki / HomeProxy / MosDNS），它们都在 IPv6 路由转发时调用 ip6tables / ip6tables-mod-nat，若不补齐 IPv6 netfilter 栈，运行时会拿到 `can't initialize iptables table 'filter'+ 模块缺失`。`h5000m.extra.config` 默认补齐 `kmod-nf-ipt6` / `kmod-ip6tables` / `kmod-ip6tables-extra` / `kmod-ipt-nat6` / `kmod-nf-nat6` / `kmod-ip6-tunnel` / `libip6tc` / `ip6tables-mod-nat` / `ip6tables-extra` / `ip6tables-nft` / `ip6tables-zz-legacy`，使 LAN/WAN IPv6 RA+DHCPv6、NDP、IPv6 NAT、fw4 IPv6 转发均能工作。原先 `enable_mwan3_stack_config` 注入的 `kmod-vrf` / `iptables-mod-conntrack-extra` / `iptables-mod-ipopt` / `kmod-ipt-ipset` 等多 WAN 专用模块已不需要（mwan3 已移除），其中与 IPv6 netfilter 栈重叠的依赖继续保留在 `h5000m.extra.config` 中供 Nikki / HomeProxy / MosDNS 共用。
 
 MTK HNAT / 网络加速：MT798x 默认启用 `kmod-mediatek_hnat`（硬件 NAT offload），`mtk_hnat_nf_hook` 在 `NF_INET_PRE_ROUTING @ NF_IP_PRI_MANGLE-1` 与 `NF_INET_PRE_ROUTING @ NF_IP_PRI_FIRST+1` 等多个优先级点向 netfilter 注册 hook，在命中硬件流表时调用 `dev_queue_xmit` 直接转发，避免 fw4 / nftables 介入。
 

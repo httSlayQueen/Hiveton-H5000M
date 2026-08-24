@@ -29,7 +29,6 @@ HOMEPROXY_REPO_URL="${HOMEPROXY_REPO_URL:-https://github.com/immortalwrt/homepro
 HOMEPROXY_REPO_BRANCH="${HOMEPROXY_REPO_BRANCH:-master}"
 HOMEPROXY_FALLBACK_REPO_URL="${HOMEPROXY_FALLBACK_REPO_URL:-https://github.com/VIKINGYFY/homeproxy}"
 HOMEPROXY_FALLBACK_REPO_BRANCH="${HOMEPROXY_FALLBACK_REPO_BRANCH:-main}"
-ADBYBY_PLUS_I18N_IPK_URL="${ADBYBY_PLUS_I18N_IPK_URL:-https://github.com/kongfl888/luci-app-adbyby-plus-lite/releases/download/2.0K5/luci-i18n-adbyby-plus-zh-cn_221024.22052_all.ipk}"
 ADGUARDHOME_IPK_URL="${ADGUARDHOME_IPK_URL:-https://github.com/sirpdboy/luci-app-adguardhome/releases/download/v1.1.1/luci-app-adguardhome_1.1.1-r1_all.ipk}"
 ADGUARDHOME_I18N_IPK_URL="${ADGUARDHOME_I18N_IPK_URL:-https://github.com/sirpdboy/luci-app-adguardhome/releases/download/v1.1.1/luci-i18n-adguardhome-zh-cn_0_all.ipk}"
 
@@ -40,12 +39,9 @@ ENABLE_UPNP="${ENABLE_UPNP:-true}"
 ENABLE_VLMCSD="${ENABLE_VLMCSD:-true}"
 ENABLE_MOSDNS="${ENABLE_MOSDNS:-true}"
 ENABLE_DOCKERMAN="${ENABLE_DOCKERMAN:-false}"
-ENABLE_QMODEM_NEXT="${ENABLE_QMODEM_NEXT:-true}"
-ENABLE_QMODEM="${ENABLE_QMODEM:-false}"
 ENABLE_HOMEPROXY="${ENABLE_HOMEPROXY:-false}"
-ENABLE_ADBYBY_PLUS="${ENABLE_ADBYBY_PLUS:-false}"
-ENABLE_ORIGINAL_MODEM="${ENABLE_ORIGINAL_MODEM:-false}"
-ENABLE_MWAN3="${ENABLE_MWAN3:-false}"
+ENABLE_ADBLOCK="${ENABLE_ADBLOCK:-true}"
+ENABLE_ORIGINAL_MODEM="${ENABLE_ORIGINAL_MODEM:-true}"
 
 INSTALL_DEPS=false
 PREPARE_ONLY=false
@@ -68,7 +64,7 @@ Options:
   -h, --help            Show this help.
 
 Feature switches are controlled by environment variables, for example:
-  ENABLE_MOSDNS=false ENABLE_QMODEM_NEXT=false THREADS=8 scripts/local-build.sh
+  ENABLE_MOSDNS=false ENABLE_ORIGINAL_MODEM=true ENABLE_ADBLOCK=true THREADS=8 scripts/local-build.sh
 
 Default feature switches match the scheduled GitHub Actions build.
 EOF
@@ -336,12 +332,9 @@ UPnP=${ENABLE_UPNP}
 VLMCSd=${ENABLE_VLMCSD}
 MosDNS=${ENABLE_MOSDNS}
 DockerMan=${ENABLE_DOCKERMAN}
-QModem Next=${ENABLE_QMODEM_NEXT}
-QModem=${ENABLE_QMODEM}
 HomeProxy=${ENABLE_HOMEPROXY}
-Adbyby Plus=${ENABLE_ADBYBY_PLUS}
+Adblock=${ENABLE_ADBLOCK}
 Original Modem=${ENABLE_ORIGINAL_MODEM}
-MWAN3=${ENABLE_MWAN3}
 GOPROXY=${GOPROXY}
 GOSUMDB=${GOSUMDB}
 DOWNLOAD_MIRROR=${DOWNLOAD_MIRROR}
@@ -385,20 +378,15 @@ prepare_feeds() {
     sed -i '/src-git nikki/d; /nikki/d' feeds.conf.default
   fi
 
-  if ! is_true "$ENABLE_QMODEM_NEXT" && ! is_true "$ENABLE_QMODEM"; then
-    sed -i '/qmodem/d' feeds.conf.default
-  fi
-
   rm -rf tmp/.config* tmp/.packageinfo tmp/.targetinfo tmp/info tmp/.feeds* feeds/*.tmp 2>/dev/null || true
   ! is_true "$ENABLE_NIKKI" && rm -rf feeds/nikki* package/feeds/nikki 2>/dev/null || true
-  ! is_true "$ENABLE_QMODEM_NEXT" && ! is_true "$ENABLE_QMODEM" && rm -rf feeds/qmodem* package/feeds/qmodem 2>/dev/null || true
 
   ensure_libcrypt_compat_package
 
   if is_true "$SKIP_FEEDS_UPDATE"; then
     log "Skipping ./scripts/feeds update -a (per --skip-feeds-update)"
   else
-    # Some feeds (e.g. qmodem) may have local modifications that block git merge.
+    # Some feeds (e.g. nikki) may have local modifications that block git merge.
     # Stash them before update and restore after so local changes are preserved.
     log "Stashing local feed changes before update"
     find feeds -mindepth 1 -maxdepth 1 -type d | while IFS= read -r feed_dir; do
@@ -435,19 +423,20 @@ fix_qmi_driver() {
 
 # --- Go 1.24 compatibility -------------------------------------------------
 # The sbwml feed builds with Go 1.24 (see install_golang_feed). Its
-# mosdns "update-dependencies" patches, however, bump go.mod to
-# `go 1.25.0` and pull in golang.org/x/sys v0.42.0 (whose go.mod declares
-# `go 1.25.0`), so they cannot build against the pinned Go 1.24 toolchain.
+# mosdns "update-dependencies" patch bumps go.mod to `go 1.25.0` and pulls
+# in golang.org/x/sys v0.42.0 (whose own go.mod declares `go 1.25.0`),
+# neither of which build against the pinned Go 1.24 toolchain.
 #
-# Instead of hardcoding a long list of per-dependency version downgrades
-# (which silently no-op the moment sbwml bumps again), normalize the patches
-# at the source level and add a general, idempotent go.mod re-pin:
-#   - mosdns: drop the go.mod/go.sum hunks of the update-dependencies patch,
-#     keeping the upstream go.mod (already `go 1.24.x`) intact;
-# The Build/Prepare hook then re-pins `go`/`toolchain` with a general regex,
-# so a future upstream bump is neutralised instead of triggering an offline
-# toolchain auto-download. Each step verifies its output and fails loudly
-# rather than silently leaving a go 1.25+ module behind.
+# Upstream IrineSistiana/mosdns v5.3.4 ships go.mod at `go 1.24.9`, already
+# Go 1.24 compatible. So the only incompatibility is what patch 100 itself
+# adds. We strip the go.mod/go.sum hunks from patch 100 (the only patch that
+# touches those files) and let the upstream go.mod pass through untouched.
+# The features added by patches 203-215 reference only mosdns packages +
+# testify (already in go.mod), so they need no go.mod/go.sum changes either.
+#
+# A future patch 100 update that re-introduces a go.mod bump will be caught
+# by the post-strip grep check in patch_mosdns_go124() and die loudly, so a
+# silent Go 1.25+ module can never reach the build dir.
 
 strip_patch_file_diffs() {
   local patch_file="$1"
@@ -489,109 +478,6 @@ strip_patch_file_diffs() {
   mv "$tmp_patch" "$patch_file"
 }
 
-# Rewrite a patch so its `go` directive and golang.org/x/sys pin stay Go
-# 1.24-compatible, using general regexes (works for any future version bump).
-rewrite_patch_to_go124() {
-  local patch_file="$1"
-  [ -f "$patch_file" ] || return 0
-
-  # `+go 1.25.0` -> `+go 1.24.0` (added lines only, any patch version)
-  sed -E -i 's|^\+go [0-9]+\.[0-9]+(\.[0-9]+)?$|+go 1.24.0|' "$patch_file"
-  # golang.org/x/sys: any version -> v0.37.0 (last release declaring go 1.24)
-  sed -E -i \
-    -e 's|golang\.org/x/sys v[0-9]+\.[0-9]+\.[0-9]+ // indirect|golang.org/x/sys v0.37.0 // indirect|' \
-    -e 's|golang\.org/x/sys v[0-9]+\.[0-9]+\.[0-9]+ h1:[A-Za-z0-9+/=]+|golang.org/x/sys v0.37.0 h1:fdNQudmxPjkdUTPnLn5mdQv7Zwvbvpaxqs831goi9kQ=|' \
-    -e 's|golang\.org/x/sys v[0-9]+\.[0-9]+\.[0-9]+/go\.mod h1:[A-Za-z0-9+/=]+|golang.org/x/sys v0.37.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=|' \
-    "$patch_file"
-}
-
-# Idempotently set GO_MOD_ARGS and add a Build/Prepare that re-pins the
-# unpacked go.mod's `go`/`toolchain` directives to the pinned Go 1.24
-# toolchain (general regex, survives future upstream version bumps).
-ensure_go124_build_prepare() {
-  local makefile="$1"
-  local pkg_name="$2"
-  local marker="$3"
-  [ -f "$makefile" ] || return 0
-
-  sed -i '/^GO_MOD_ARGS[[:space:]]*[:+?]*=/d' "$makefile"
-  sed -i '/golang-package.mk/a GO_MOD_ARGS:= -mod=mod -modcacherw' "$makefile"
-
-  local tmp_makefile
-  tmp_makefile="$(mktemp)"
-  awk -v marker="$marker" '
-    /^define Build\/Prepare$/ { collecting=1; block=$0 ORS; next }
-    collecting {
-      block=block $0 ORS
-      if ($0 == "endef") {
-        if (block !~ marker) { printf "%s", block }
-        collecting=0; block=""
-      }
-      next
-    }
-    { print }
-    END { if (collecting && block !~ marker) printf "%s", block }
-  ' "$makefile" > "$tmp_makefile"
-  mv "$tmp_makefile" "$makefile"
-
-  # Build the Build/Prepare block as plain text via a quoted heredoc so that
-  # `$$`, `\047`, `\\.` etc. are preserved byte-for-byte with no shell/awk
-  # string escaping. We previously emitted this block via `awk 'print ...'`
-  # with three nested escape layers (`\047` for `'`, `\\.` for regex dot,
-  # bare `$$` for make's `$$`->`$` conversion) which on some CI runners
-  # (bash/awk/mawk version skew) produced a corrupted Makefile whose sed
-  # expression lacked the `$$` end anchor, leaving the replacement string
-  # glued to the pattern (symptom: `sed: char N: unterminated 's' command`).
-  local prepare_block
-  prepare_block="$(mktemp)"
-  cat > "$prepare_block" <<'PREP_EOF'
-
-define Build/Prepare
-	$(call Build/Prepare/Default)
-	# __MARKER__
-	sed -i -E 's|^go [0-9]+\.[0-9]+(\.[0-9]+)?$$|go 1.24.0|' $(PKG_BUILD_DIR)/go.mod
-	sed -i -E 's|^toolchain go[0-9]+\.[0-9]+(\.[0-9]+)?$$|toolchain go1.24.13|' $(PKG_BUILD_DIR)/go.mod
-endef
-PREP_EOF
-  # Substitute the marker sentinel with the actual marker text. Pick a
-  # delimiter that can't appear in any realistic marker string.
-  sed -i "s|__MARKER__|${marker}|" "$prepare_block"
-
-  # Insert the prepared block before the GoBinPackage eval line. The awk
-  # only does line matching + file reads — no string-escape acrobatics.
-  tmp_makefile="$(mktemp)"
-  awk -v pkg="$pkg_name" -v block_file="$prepare_block" '
-    index($0, "$(eval $(call GoBinPackage," pkg ")") && !inserted {
-      while ((getline line < block_file) > 0) print line
-      close(block_file)
-      print ""
-      inserted=1
-    }
-    { print }
-  ' "$makefile" > "$tmp_makefile"
-  rm -f "$prepare_block"
-  mv "$tmp_makefile" "$makefile"
-
-  # Defensive verification: catch environment-specific corruption early with
-  # a clear, actionable error instead of letting it surface hours later as a
-  # cryptic sed error inside make. We check three invariants:
-  #   1. marker comment is present (idempotency key)
-  #   2. literal `$$` end anchor is present (otherwise make would expand it
-  #      to `$` and we'd lose the regex anchor — but the *raw* file must
-  #      still contain `$$`, otherwise we know the heredoc was mangled)
-  #   3. no known-bad patterns leaked in (regex end anchor fell off and the
-  #      replacement glued itself onto the pattern)
-  if ! grep -qF "# ${marker}" "$makefile"; then
-    die "ensure_go124_build_prepare: marker '# ${marker}' missing in $makefile (Build/Prepare block not injected)"
-  fi
-  if ! grep -qF ')?$$|go 1.24.0|' "$makefile"; then
-    die "ensure_go124_build_prepare: literal '\$\$|go 1.24.0|' anchor missing in $makefile (heredoc/escape corruption?)"
-  fi
-  if grep -qF ')?go 1.24.0|' "$makefile"; then
-    die "ensure_go124_build_prepare: corrupted sed pattern detected in $makefile (CI env mangled the awk/heredoc output — please file a bug)"
-  fi
-}
-
 patch_mosdns_go124() {
   local patch_dir="package/mosdns/mosdns/patches"
   [ -d "$patch_dir" ] || return 0
@@ -605,7 +491,6 @@ patch_mosdns_go124() {
     fi
   fi
 
-  ensure_go124_build_prepare "package/mosdns/mosdns/Makefile" "mosdns" "MosDNS Go 1.24 compatibility"
   rm -f "$patch_dir/999-fix-go-version-for-go124.patch"
   rm -rf build_dir/target-*/mosdns-* 2>/dev/null || true
 }
@@ -878,13 +763,6 @@ EOF
 }
 
 ensure_external_luci_i18n_packages() {
-  is_true "$ENABLE_ADBYBY_PLUS" && ensure_prebuilt_luci_i18n_package \
-    luci-i18n-adbyby-plus-zh-cn \
-    221024.22052 \
-    "$ADBYBY_PLUS_I18N_IPK_URL" \
-    luci-app-adbyby-plus \
-    "Adbyby Plus Chinese translation"
-
   if is_true "$ENABLE_ADGUARDHOME"; then
     # sirpdboy/luci-app-adguardhome v1.1.1 ships as two prebuilt ipks (main
     # app + zh-cn translation). Both releases are gzip-wrapped tarballs
@@ -903,88 +781,6 @@ ensure_external_luci_i18n_packages() {
       luci-app-adguardhome \
       "AdGuardHome Simplified Chinese translation"
   fi
-}
-
-patch_qmodem_depends() {
-  # FUjr/QModem 的 qmodem/Makefile 里有一段：
-  #   +PACKAGE_luci-app-qmodem_GENERIC_MHI_PCIe_DRIVER:kmod-mhi-wwan-ctrl \
-  #   +PACKAGE_luci-app-qmodem_GENERIC_MHI_PCIe_DRIVER:kmod-mhi-wwan-mbim \
-  # 这两个 dep 实际上没有任何 feed 提供（它们既不是独立的 Makefile，
-  # 也不是上游 kernel 里的 kmod 子包），OpenWrt 的 package-metadata.pl
-  # 会在 feeds install 阶段反复报：
-  #   WARNING: Makefile '...' has a dependency on 'PACKAGE_..._GENERIC_MHI_PCIe_DRIVER:', which does not exist
-  #   WARNING: Makefile '...' has a dependency on '-ctrl', which does not exist
-  #   WARNING: Makefile '...' has a dependency on '-mbim', which does not exist
-  # 即便去掉 `\` 续行也无济于事——它们的解析结果本身就是空 dep + 残留 "-ctrl/-mbim"。
-  # 这里的 sed 把这两行去掉；前面已有的 +kmod-mhi-wwan 保持原样（在 feeds install 后
-  # 已经通过 apply_package_fixes 末尾的 sed 's/+\?kmod-mhi-wwan//g' 处理）。
-  #
-  # 同时按用户要求把所有 `\` 续行合并为单行，让 Make 直接按 token 解析，
-  # 避免某些解析器对 line-continuation + 末尾特殊字符的边界歧义。
-  local qmodem_mf="package/feeds/qmodem/qmodem/Makefile"
-  [ -f "$qmodem_mf" ] || return 0
-
-  log "Patching qmodem Makefile: drop unresolved -ctrl/-mbim conditional deps and collapse \\ continuations"
-  cp -f "$qmodem_mf" "$qmodem_mf.orig"
-
-  # 1) 去掉那两个无法解析的条件依赖行（包括前面 TAB 和末尾的 ` \`）
-  sed -i '/^[[:space:]]*+PACKAGE_luci-app-qmodem_GENERIC_MHI_PCIe_DRIVER:kmod-mhi-wwan-ctrl[[:space:]]*\\$/d' "$qmodem_mf"
-  sed -i '/^[[:space:]]*+PACKAGE_luci-app-qmodem_GENERIC_MHI_PCIe_DRIVER:kmod-mhi-wwan-mbim[[:space:]]*\\$/d' "$qmodem_mf"
-
-  # 2) 把 `\` 行尾续行符去掉（让 Make 把多行值视为单行 tokens，避开某些解析路径）
-  #    只处理 DEPENDS 块；用 awk 按行扫描，进入 DEPENDS:= 起到 endef 之间做合并
-  awk '
-    /^[[:space:]]*DEPENDS:=/ { in_depends=1 }
-    in_depends && /^endef/ { in_depends=0 }
-    in_depends {
-      # 去掉行尾的续行符（` \` 或 `\`）
-      sub(/[[:space:]]*\\$/, "")
-      # 合并多行：在当前行末尾加一个空格分隔
-      if (buf != "") buf = buf " "
-      buf = buf $0
-      next
-    }
-    {
-      if (buf != "") { print buf; buf="" }
-      print
-    }
-    END { if (buf != "") print buf }
-  ' "$qmodem_mf" > "$qmodem_mf.new" && mv "$qmodem_mf.new" "$qmodem_mf"
-
-  # 简单健全性校验：DEPENDS 行应仍然包含关键 token（防 sed 把整段 DEPENDS 删没了）
-  if ! grep -q '+PACKAGE_luci-app-qmodem_GENERIC_MHI_PCIe_DRIVER:kmod-mhi-wwan ' "$qmodem_mf" \
-     && ! grep -q '+PACKAGE_luci-app-qmodem_GENERIC_MHI_PCIe_DRIVER:kmod-mhi-wwan"' "$qmodem_mf" \
-     && ! grep -q '+PACKAGE_luci-app-qmodem_GENERIC_MHI_PCIe_DRIVER:kmod-mhi-wwan$' "$qmodem_mf"; then
-    die "patch_qmodem_depends: DEPENDS rewrite lost expected token (kmod-mhi-wwan). Restoring backup."
-  fi
-
-  # 校验：残留的 -ctrl/-mbim 行应已不存在
-  if grep -E 'kmod-mhi-wwan-(ctrl|mbim)' "$qmodem_mf"; then
-    die "patch_qmodem_depends: -ctrl/-mbim still present after patch; upstream Makefile changed?"
-  fi
-
-  rm -f "$qmodem_mf.orig"
-  log "qmodem Makefile patched successfully"
-}
-
-patch_qmodem_rmnet_nss_depends() {
-  # FUjr/QModem 的 rmnet-nss Makefile 里声明了 +kmod-qca-nss-drv，
-  # 但 OpenWrt 官方 feeds 与 immortalwrt-mt798x 仓库均未携带该包，
-  # package-metadata.pl 会反复报：
-  #   WARNING: Makefile '...' has a dependency on 'kmod-qca-nss-drv', which does not exist
-  # 该 dep 只在 Qualcomm IPQ 系列平台下使用，mt798x (Filogic) 用不到，直接剥离即可。
-  local nss_mf="package/feeds/qmodem/rmnet-nss/Makefile"
-  [ -f "$nss_mf" ] || return 0
-
-  if ! grep -q 'kmod-qca-nss-drv' "$nss_mf"; then
-    return 0
-  fi
-
-  log "Patching rmnet-nss Makefile: drop unresolved +kmod-qca-nss-drv dep"
-  cp -f "$nss_mf" "$nss_mf.orig"
-  sed -i 's/+\?kmod-qca-nss-drv//g' "$nss_mf"
-  rm -f "$nss_mf.orig"
-  log "rmnet-nss Makefile patched successfully"
 }
 
 patch_homeproxy_no_wan_default_interface() {
@@ -1117,8 +913,6 @@ apply_package_fixes() {
   patch_mtk_hnat_local_dest
   patch_mtwifi7_sta_mgmt_assoc_hostapd_guard
   ensure_external_luci_i18n_packages
-  patch_qmodem_depends
-  patch_qmodem_rmnet_nss_depends
 
   local ebtables_makefile="package/network/utils/ebtables/Makefile"
   if [ -f "$ebtables_makefile" ] && grep -qE 'git(://|s://git\.)netfilter\.org/ebtables' "$ebtables_makefile"; then
@@ -1135,10 +929,10 @@ apply_package_fixes() {
   fix_qmi_driver "package/mtk/applications/5g-modem/simcom_QMI_WWAN/qmi_wwan_s.c"
   fix_qmi_driver "package/mtk/applications/5g-modem/simcom_QMI_WWAN/src/qmi_wwan_s.c"
 
-  if [ -d "feeds/qmodem" ]; then
-    while IFS= read -r driver_file; do
-      fix_qmi_driver "$driver_file"
-    done < <(find feeds/qmodem -name '*.c' -type f -print0 2>/dev/null | xargs -0 grep -l 'u64_stats_fetch_begin_irq\|memcpy.*dev_addr' 2>/dev/null || true)
+  if [ -d "feeds/luci/applications/luci-app-modem" ] || [ -d "package/feeds/luci/luci-app-modem" ]; then
+    # upstream luci-app-modem supports standard QMI/ModemManager modems,
+    # including Quectel RG501Q-EU/RM5xxQ series. No patching required.
+    log "luci-app-modem detected; using upstream ModemManager for 5G modems"
   fi
 
   if is_true "$ENABLE_ADGUARDHOME"; then
@@ -1157,17 +951,6 @@ apply_package_fixes() {
       rm -rf /tmp/openclash
     fi
     [ -f "package/luci-app-openclash/Makefile" ] || die "luci-app-openclash repository layout changed"
-  fi
-
-  if is_true "$ENABLE_ADBYBY_PLUS"; then
-    if [ ! -d "package/luci-app-adbyby-plus" ]; then
-      rm -rf /tmp/adbyby-plus-lite
-      git_clone_retry https://github.com/kongfl888/luci-app-adbyby-plus-lite.git "" /tmp/adbyby-plus-lite 1
-      (cd /tmp/adbyby-plus-lite && git submodule update --init --recursive) || true
-      [ -d "/tmp/adbyby-plus-lite/luci-app-adbyby-plus" ] || die "Adbyby Plus Lite repository layout changed"
-      cp -r /tmp/adbyby-plus-lite/luci-app-adbyby-plus package/luci-app-adbyby-plus
-      rm -rf /tmp/adbyby-plus-lite
-    fi
   fi
 
   if is_true "$ENABLE_MOSDNS"; then
@@ -1208,16 +991,11 @@ apply_package_fixes() {
     rm -rf tmp/.config* tmp/.packageinfo tmp/info/.packageinfo* 2>/dev/null || true
   fi
 
-  if [ -d "package/feeds/qmodem" ]; then
-    rm -rf package/feeds/qmodem/ndisc6 2>/dev/null || true
-    find . -path '*qmodem*Makefile' -exec sed -i 's/+\?kmod-mhi-wwan//g' {} \; 2>/dev/null || true
-  fi
-
   [ -f "package/mtk/drivers/mt_hwifi/Makefile" ] && sed -i 's/+kmod-mt_wifi_osal//g' "package/mtk/drivers/mt_hwifi/Makefile" || true
 
   # luci-app-turboacc-mtk and luci-app-Airpifanctrl are not in the upstream
   # feeds wired up in feeds.conf.default (immortalwrt-24.10 + openwrt routing +
-  # telephony + nikki + qmodem). Without these clones, both CONFIG_PACKAGE
+  # telephony + nikki). Without these clones, both CONFIG_PACKAGE
   # lines in h5000m.extra.config get silently dropped by make defconfig, so
   # the LuCI Network Acceleration / Fan control panels are absent even
   # though .config requests them.
@@ -1328,9 +1106,9 @@ export MIHOMO_TCP_KEEPALIVE="1"\
     feed_install_pkg luci-i18n-adguardhome-zh-cn
   fi
 
-  if is_true "$ENABLE_MWAN3"; then
-    feed_install_pkg mwan3
-    feed_install_pkg luci-app-mwan3
+  if is_true "$ENABLE_ADBLOCK"; then
+    feed_install_pkg adblock
+    feed_install_pkg luci-app-adblock
   fi
 
   if is_true "$ENABLE_MOSDNS"; then
@@ -1392,66 +1170,31 @@ enable_upnp_stack_config() {
   config_enable PACKAGE_libnftnl
 }
 
-# Enable the full MWAN3 stack: kernel netfilter modules, iptables userspace
-# extensions, ipset, VRF support, and LuCI integration.
-# - kmod-vrf needs KERNEL_NET_L3_MASTER_DEV, otherwise LuCI's device add dialog
-#   prompts "需要 kmod-vrf" and the package remains unbuildable.
-# - kmod-ipt-ipset / -conntrack-extra / -ipopt must be selected at build time
-#   so they land in the image; otherwise users hit "依赖的软件包 ... 在所有仓库都未提供"
-#   when trying to opkg-install luci-app-mwan3 at runtime.
-enable_mwan3_stack_config() {
-  # Kernel prerequisites for kmod-vrf
-  config_enable KERNEL_NET_L3_MASTER_DEV
-  # MWAN3 core + LuCI
-  config_enable PACKAGE_mwan3
-  config_enable PACKAGE_luci-app-mwan3
-  config_enable PACKAGE_luci-i18n-mwan3-zh-cn
-  # Userspace tools mwan3 invokes.
-  # 'ip' is a virtual package provided by ip-tiny (default) or ip-full.
-  # We pick ip-full explicitly so mwan3 gets the full iproute2 feature set.
-  config_enable PACKAGE_ip-full
-  config_enable PACKAGE_ipset
-  # 'iptables' is a virtual package provided by either iptables-nft or
-  # iptables-zz-legacy. Selecting CONFIG_PACKAGE_iptables=y directly gets
-  # dropped by make defconfig once firewall4 has already picked iptables-nft.
-  # Pick both real variants so mwan3's legacy iptables calls work and the
-  # fw4-required nftables frontend stays available.
-  config_enable PACKAGE_iptables-nft
-  config_enable PACKAGE_iptables-zz-legacy
-  # Same story for IPv6: 'ip6tables' is virtual; select both real variants.
-  config_enable PACKAGE_ip6tables-nft
-  config_enable PACKAGE_ip6tables-zz-legacy
-  # IPv6 kernel modules backing ip6tables. mwan3 v2.11.16 (when IPV6 is
-  # enabled) builds mwan3_hook with -p ipv6-icmp -m icmp6 --icmpv6-type
-  # 133/134/135/136/137 (NDP RS/RA/NS/NA), creates IPv6 ipset tables
-  # (family inet6), and steers IPv6 routing via ip -6. None of those work
-  # if kmod-ip6tables / kmod-ipt-nat6 / libip6tc are absent from the image.
-  config_enable PACKAGE_kmod-ip6tables
-  config_enable PACKAGE_kmod-ip6tables-extra
-  config_enable PACKAGE_kmod-ipt-nat6
-  config_enable PACKAGE_kmod-nf-nat6
-  config_enable PACKAGE_kmod-nf-ipt6
-  config_enable PACKAGE_kmod-ip6-tunnel
-  config_enable PACKAGE_libip6tc
-  config_enable PACKAGE_ip6tables-mod-nat
-  config_enable PACKAGE_ip6tables-extra
+# Enable the full adblock stack (DNS-based ad/abuse domain blocking).
+# adblock upstream package DEPENDS are: +jshn +jsonfilter +coreutils +coreutils-sort
+#   +gawk +ca-bundle +rpcd +rpcd-mod-rpcsys
+# luci-app-adblock is a thin LuCI frontend (LUCI_DEPENDS: +luci-base +adblock).
+# We additionally ensure luci-i18n-adblock-zh-cn is selectable and that the
+# blocklist refresh tools (curl/wget) are present.
+enable_adblock_stack_config() {
+  # adblock + LuCI UI + zh-cn translation
+  config_enable PACKAGE_adblock
+  config_enable PACKAGE_luci-app-adblock
+  config_enable PACKAGE_luci-i18n-adblock-zh-cn
+  # adblock runtime dependencies (kept here for clarity even though feeds'
+  # DEPENDS already cover most; explicit =y makes defconfig robust against
+  # upstream Makefile reorderings).
   config_enable PACKAGE_jshn
-  # iptables userspace extensions required by mwan3 scripts
-  config_enable PACKAGE_iptables-mod-conntrack-extra
-  config_enable PACKAGE_iptables-mod-ipopt
-  # Kernel modules backing those extensions
-  config_enable PACKAGE_kmod-ipt-core
-  config_enable PACKAGE_kmod-ipt-conntrack
-  config_enable PACKAGE_kmod-ipt-conntrack-extra
-  config_enable PACKAGE_kmod-ipt-ipopt
-  config_enable PACKAGE_kmod-ipt-ipset
-  config_enable PACKAGE_kmod-ipt-raw
-  config_enable PACKAGE_kmod-nf-conntrack
-  config_enable PACKAGE_kmod-nf-conntrack6
-  config_enable PACKAGE_kmod-nf-conncount
-  config_enable PACKAGE_kmod-nfnetlink
-  # VRF support (needed by LuCI device dialog when adding VRF devices)
-  config_enable PACKAGE_kmod-vrf
+  config_enable PACKAGE_jsonfilter
+  config_enable PACKAGE_coreutils
+  config_enable PACKAGE_coreutils-sort
+  config_enable PACKAGE_gawk
+  config_enable PACKAGE_ca-bundle
+  config_enable PACKAGE_rpcd
+  config_enable PACKAGE_rpcd-mod-rpcsys
+  # Blocklist refresh transport (HTTPS)
+  config_enable PACKAGE_curl
+  config_enable PACKAGE_ca-certificates
 }
 
 enable_h5000m_wifi_driver_config() {
@@ -1636,13 +1379,6 @@ retry_upnp_config_if_needed() {
 configure_build() {
   log "Configuring build"
   cd "$ROOT_DIR/$SOURCE_DIR"
-
-  if is_true "$ENABLE_QMODEM_NEXT" && is_true "$ENABLE_QMODEM"; then
-    die "ENABLE_QMODEM_NEXT and ENABLE_QMODEM cannot both be true"
-  fi
-  if is_true "$ENABLE_ORIGINAL_MODEM" && { is_true "$ENABLE_QMODEM_NEXT" || is_true "$ENABLE_QMODEM"; }; then
-    die "ENABLE_ORIGINAL_MODEM conflicts with QModem options"
-  fi
 
   curl_fetch_retry "$CONFIG_URL" base.config || {
     [ -f "defconfig/mt7987_mt7992.config" ] && cp defconfig/mt7987_mt7992.config base.config
@@ -1883,48 +1619,10 @@ EOF
   if is_true "$ENABLE_UPNP"; then
     enable_upnp_stack_config
   fi
-  if is_true "$ENABLE_MWAN3"; then
-    cat >> .config <<'EOF'
-CONFIG_KERNEL_NET_L3_MASTER_DEV=y
-CONFIG_PACKAGE_kmod-vrf=y
-CONFIG_PACKAGE_mwan3=y
-CONFIG_PACKAGE_luci-app-mwan3=y
-CONFIG_PACKAGE_luci-i18n-mwan3-zh-cn=y
-CONFIG_PACKAGE_ip-full=y
-CONFIG_PACKAGE_ipset=y
-CONFIG_PACKAGE_iptables-nft=y
-CONFIG_PACKAGE_iptables-zz-legacy=y
-CONFIG_PACKAGE_ip6tables-nft=y
-CONFIG_PACKAGE_ip6tables-zz-legacy=y
-# IPv6 netfilter kernel + userspace pieces needed by mwan3 in IPV6 mode
-# (NDP-matching ip6tables hooks, IPv6 NAT, ipset family inet6).
-CONFIG_PACKAGE_kmod-ip6tables=y
-CONFIG_PACKAGE_kmod-ip6tables-extra=y
-CONFIG_PACKAGE_kmod-ipt-nat6=y
-CONFIG_PACKAGE_kmod-nf-nat6=y
-CONFIG_PACKAGE_kmod-nf-ipt6=y
-CONFIG_PACKAGE_kmod-ip6-tunnel=y
-CONFIG_PACKAGE_libip6tc=y
-CONFIG_PACKAGE_ip6tables-mod-nat=y
-CONFIG_PACKAGE_ip6tables-extra=y
-CONFIG_PACKAGE_jshn=y
-CONFIG_PACKAGE_iptables-mod-conntrack-extra=y
-CONFIG_PACKAGE_iptables-mod-ipopt=y
-CONFIG_PACKAGE_kmod-ipt-core=y
-CONFIG_PACKAGE_kmod-ipt-conntrack=y
-CONFIG_PACKAGE_kmod-ipt-conntrack-extra=y
-CONFIG_PACKAGE_kmod-ipt-ipopt=y
-CONFIG_PACKAGE_kmod-ipt-ipset=y
-CONFIG_PACKAGE_kmod-ipt-raw=y
-CONFIG_PACKAGE_kmod-nf-conntrack=y
-CONFIG_PACKAGE_kmod-nf-conntrack6=y
-CONFIG_PACKAGE_kmod-nf-conncount=y
-CONFIG_PACKAGE_kmod-nfnetlink=y
-EOF
-  else
-    disabled_pkgs+=("mwan3" "luci-app-mwan3" "luci-i18n-mwan3-zh-cn")
+  if is_true "$ENABLE_ADBLOCK"; then
+    enable_adblock_stack_config
   fi
-  is_true "$ENABLE_ADBYBY_PLUS" && { echo "CONFIG_PACKAGE_luci-app-adbyby-plus=y" >> .config; echo "CONFIG_PACKAGE_luci-i18n-adbyby-plus-zh-cn=y" >> .config; echo "CONFIG_PACKAGE_ipset=y" >> .config; } || disabled_pkgs+=("luci-app-adbyby-plus" "luci-i18n-adbyby-plus-zh-cn")
+  # adbyby-plus removed; upstream adblock (see enable_adblock_stack_config) covers ad-blocking
 
   if is_true "$ENABLE_DOCKERMAN"; then
     cat >> .config <<'EOF'
@@ -1942,40 +1640,15 @@ EOF
 
   if is_true "$ENABLE_ORIGINAL_MODEM"; then
     echo "CONFIG_PACKAGE_luci-app-modem=y" >> .config
-    echo "CONFIG_PACKAGE_modem=y" >> .config
     echo "CONFIG_PACKAGE_luci-i18n-modem-zh-cn=y" >> .config
+    # luci-app-modem lives at immortalwrt-mt798x/package/mtk/applications/5g-modem/
+    # (Siriling's port; supports USB + PCIe 5G modems incl. Quectel RG500Q-EA/RG520N-EU
+    # and most RM5xxQ series). Its LUCI_DEPENDS already covers every kernel module
+    # and tool the UI invokes (kmod-usb-net-qmi-wwan, kmod-pcie_mhi, quectel-CM-5G,
+    # sms-tool, ndisc6, jq, bc, etc.), so we only need to flip the luci-app itself.
+    # luci-i18n-modem-zh-cn is auto-generated from the package's po/zh-cn/ tree.
   else
-    disabled_pkgs+=("luci-app-modem" "modem" "luci-i18n-modem-zh-cn" "luci-i18n-modem-en")
-  fi
-
-  if is_true "$ENABLE_QMODEM_NEXT"; then
-    echo "CONFIG_PACKAGE_luci-app-qmodem-next=y" >> .config
-    echo "CONFIG_PACKAGE_luci-i18n-qmodem-next-zh-cn=y" >> .config
-  elif is_true "$ENABLE_QMODEM"; then
-    cat >> .config <<'EOF'
-CONFIG_PACKAGE_luci-app-qmodem=y
-CONFIG_PACKAGE_luci-compat=y
-CONFIG_PACKAGE_qmodem=y
-CONFIG_PACKAGE_luci-app-qmodem_INCLUDE_vendor-qmi-wwan=y
-# CONFIG_PACKAGE_luci-app-qmodem_INCLUDE_generic-qmi-wwan is not set
-CONFIG_PACKAGE_luci-app-qmodem_INCLUDE_ndisc6=y
-# CONFIG_PACKAGE_luci-app-qmodem_INCLUDE_rdisc6 is not set
-# CONFIG_PACKAGE_luci-app-qmodem_INCLUDE_no_ndisc_rdisc6 is not set
-CONFIG_PACKAGE_ndisc6=y
-CONFIG_PACKAGE_luci-app-qmodem_USE_TOM_CUSTOMIZED_QUECTEL_CM=y
-# CONFIG_PACKAGE_luci-app-qmodem_USING_QWRT_QUECTEL_CM_5G is not set
-# CONFIG_PACKAGE_luci-app-qmodem_USING_NORMAL_QUECTEL_CM is not set
-CONFIG_PACKAGE_quectel-CM-5G-M=y
-CONFIG_PACKAGE_sms-tool_q=y
-CONFIG_PACKAGE_ubus-at-daemon=y
-CONFIG_PACKAGE_tom_modem=y
-CONFIG_PACKAGE_kmod-qmi_wwan_q=y
-CONFIG_PACKAGE_kmod-qmi_wwan_f=y
-CONFIG_PACKAGE_kmod-qmi_wwan_s=y
-CONFIG_PACKAGE_mtkhqos_util=y
-EOF
-  else
-    disabled_pkgs+=("luci-app-qmodem-next" "luci-i18n-qmodem-next-zh-cn" "luci-app-qmodem")
+    disabled_pkgs+=("luci-app-modem" "luci-i18n-modem-zh-cn" "luci-i18n-modem-en")
   fi
 
   local all_disabled=("luci-app-wrtbwmon" "luci-app-rclone" "rclone" "rclone-ng" "rclone-webui-react" "${disabled_pkgs[@]}")
@@ -2007,10 +1680,6 @@ EOF
   if is_true "$ENABLE_UPNP"; then
     config_disable PACKAGE_miniupnpd-iptables
     enable_upnp_stack_config
-  fi
-
-  if is_true "$ENABLE_MWAN3"; then
-    enable_mwan3_stack_config
   fi
 
   if is_true "$ENABLE_HOMEPROXY"; then
@@ -2067,37 +1736,16 @@ EOF
   verify_enabled_pkg "MosDNS geosite" "v2ray-geosite" "$ENABLE_MOSDNS"
   verify_enabled_pkg "DockerMan" "luci-app-dockerman" "$ENABLE_DOCKERMAN"
   verify_enabled_pkg "DockerMan zh-cn" "luci-i18n-dockerman-zh-cn" "$ENABLE_DOCKERMAN"
-  verify_enabled_pkg "QModem Next" "luci-app-qmodem-next" "$ENABLE_QMODEM_NEXT"
-  verify_enabled_pkg "QModem Next zh-cn" "luci-i18n-qmodem-next-zh-cn" "$ENABLE_QMODEM_NEXT"
+  verify_enabled_pkg "Original Modem" "luci-app-modem" "$ENABLE_ORIGINAL_MODEM"
+  verify_enabled_pkg "Original Modem zh-cn" "luci-i18n-modem-zh-cn" "$ENABLE_ORIGINAL_MODEM"
   verify_enabled_pkg "HomeProxy" "luci-app-homeproxy" "$ENABLE_HOMEPROXY"
   verify_enabled_pkg "HomeProxy zh-cn" "luci-i18n-homeproxy-zh-cn" "$ENABLE_HOMEPROXY"
   verify_enabled_pkg "HomeProxy sing-box" "sing-box" "$ENABLE_HOMEPROXY"
   verify_enabled_pkg "HomeProxy nft tproxy" "kmod-nft-tproxy" "$ENABLE_HOMEPROXY"
-  verify_enabled_pkg "Adbyby Plus" "luci-app-adbyby-plus" "$ENABLE_ADBYBY_PLUS"
-  verify_enabled_pkg "Adbyby Plus zh-cn" "luci-i18n-adbyby-plus-zh-cn" "$ENABLE_ADBYBY_PLUS"
-  verify_enabled_pkg "MWAN3 LuCI" "luci-app-mwan3" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 zh-cn" "luci-i18n-mwan3-zh-cn" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 ipset userspace" "ipset" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 iptables-nft" "iptables-nft" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 iptables-zz-legacy" "iptables-zz-legacy" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 ip6tables-nft" "ip6tables-nft" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 ip6tables-zz-legacy" "ip6tables-zz-legacy" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 IPv6 netfilter core" "kmod-ip6tables" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 IPv6 icmp6 match" "kmod-ip6tables-extra" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 IPv6 NAT" "kmod-ipt-nat6" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 IPv6 NAT core" "kmod-nf-nat6" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 IPv6 iptables core" "kmod-nf-ipt6" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 libip6tc" "libip6tc" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 ip6tables-mod-nat" "ip6tables-mod-nat" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 iptables-mod-conntrack-extra" "iptables-mod-conntrack-extra" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 iptables-mod-ipopt" "iptables-mod-ipopt" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 kmod-ipt-conntrack-extra" "kmod-ipt-conntrack-extra" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 kmod-ipt-ipopt" "kmod-ipt-ipopt" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 kmod-ipt-ipset" "kmod-ipt-ipset" "$ENABLE_MWAN3"
-  verify_enabled_pkg "MWAN3 kmod-vrf" "kmod-vrf" "$ENABLE_MWAN3"
-  if is_true "$ENABLE_MWAN3"; then
-    verify_config_symbol "MWAN3 VRF kernel prereq" "CONFIG_KERNEL_NET_L3_MASTER_DEV=y"
-  fi
+  verify_enabled_pkg "Adblock" "adblock" "$ENABLE_ADBLOCK"
+  verify_enabled_pkg "Adblock LuCI" "luci-app-adblock" "$ENABLE_ADBLOCK"
+  verify_enabled_pkg "Adblock zh-cn" "luci-i18n-adblock-zh-cn" "$ENABLE_ADBLOCK"
+  # MWAN3 removed; no verify checks (see ENABLE_MWAN3=false default).
   verify_enabled_pkg "MT WiFi zh-cn" "luci-i18n-mtwifi-cfg-zh-cn" true
   # Network acceleration (turboacc-mtk) and fan control (Airpifanctrl) are
   # always-on base options in h5000m.extra.config; if the upstream package
@@ -2138,7 +1786,7 @@ EOF
   verify_enabled_pkg "H5000M MT7992 chip driver" "kmod-mt7992" true
   verify_enabled_pkg "H5000M MT799A chip driver" "kmod-mt799a" true
   verify_translation_file "OpenClash built-in zh-cn" "package/luci-app-openclash/po/zh-cn/openclash.zh-cn.po" "$ENABLE_OPENCLASH"
-  verify_translation_file "Adbyby Plus built-in zh-cn" "package/luci-app-adbyby-plus/po/zh-cn/adbyby.po" "$ENABLE_ADBYBY_PLUS"
+  
 }
 
 verify_enabled_pkg() {
@@ -2318,8 +1966,8 @@ collect_artifacts() {
   if is_true "$ENABLE_ADGUARDHOME" && ! grep -q '^luci-i18n-adguardhome-zh-cn[[:space:]-]' "$ARTIFACTS_DIR/openwrt-image.manifest"; then
     die "Firmware image manifest is missing required package: luci-i18n-adguardhome-zh-cn"
   fi
-  if is_true "$ENABLE_ADBYBY_PLUS" && ! grep -q '^luci-i18n-adbyby-plus-zh-cn[[:space:]-]' "$ARTIFACTS_DIR/openwrt-image.manifest"; then
-    die "Firmware image manifest is missing required package: luci-i18n-adbyby-plus-zh-cn"
+  if is_true "$ENABLE_ADBLOCK" && ! grep -q '^adblock[[:space:]-]' "$ARTIFACTS_DIR/openwrt-image.manifest"; then
+    die "Firmware image manifest is missing required package: adblock"
   fi
   if is_true "$ENABLE_HOMEPROXY" && ! grep -q '^luci-app-homeproxy[[:space:]-]' "$ARTIFACTS_DIR/openwrt-image.manifest"; then
     die "Firmware image manifest is missing required package: luci-app-homeproxy"
