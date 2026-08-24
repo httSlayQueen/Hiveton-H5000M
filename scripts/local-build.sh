@@ -1243,6 +1243,21 @@ install_selected_packages() {
         -e "s/\(option[[:space:]]\+test_profile[[:space:]]\+\)1\($\)/\10/" \
         "$nikki_conf"
     fi
+
+    # Nikki/mihomo stability: increase timeouts to handle occasional connection issues
+    local nikki_init="feeds/nikki/nikki/files/etc/init.d/nikki"
+    if [ -f "$nikki_init" ]; then
+      # Backup original init script
+      cp "$nikki_init" "$nikki_init.bak"
+      # Add stability environment variables at the top
+      sed -i '1i\
+# Nikki stability: increase timeouts for flaky connections\
+export MIHOMO_DNS_TIMEOUT="10"\
+export MIHOMO_POOL_TIMEOUT="300"\
+export MIHOMO_TCP_KEEPALIVE="1"\
+' "$nikki_init"
+      log "Nikki stability overrides applied"
+    fi
   fi
 
   if is_true "$ENABLE_UPNP"; then
@@ -1474,7 +1489,6 @@ CONFIG_MTK_HWIFI_WED_SUPPORT=y
 CONFIG_MTK_HWIFI_MT7992=y
 CONFIG_MTK_HWIFI_MT799A=y
 CONFIG_PACKAGE_kmod-mtk_pci=y
-CONFIG_PACKAGE_kmod-mtk_wed=y
 CONFIG_PACKAGE_kmod-connac_if=y
 CONFIG_PACKAGE_kmod-mt7992=y
 CONFIG_PACKAGE_kmod-mt799a=y
@@ -1482,6 +1496,17 @@ CONFIG_PACKAGE_mtwifi-cfg=y
 CONFIG_PACKAGE_luci-app-mtwifi-cfg=y
 CONFIG_PACKAGE_wireless-regdb=y
 EOF
+
+  # Respect WED setting from h5000m.extra.config: if user commented out
+  # CONFIG_PACKAGE_kmod-mtk_wed (i.e. "is not set"), do not add the default
+  # CONFIG_PACKAGE_kmod-mtk_wed=y below. This allows disabling WED for stability
+  # testing without touching local-build.sh.
+  if grep -q '^# CONFIG_PACKAGE_kmod-mtk_wed is not set$' "$ROOT_DIR/h5000m.extra.config" 2>/dev/null || \
+     grep -q '^CONFIG_PACKAGE_kmod-mtk_wed is not set$' "$ROOT_DIR/h5000m.extra.config" 2>/dev/null; then
+    log "WED disabled via h5000m.extra.config; skipping kmod-mtk_wed"
+  else
+    echo "CONFIG_PACKAGE_kmod-mtk_wed=y" >> .config
+  fi
 
   local disabled_pkgs=("luci-app-sms-tool-lite" "luci-app-3ginfo-lite")
 
