@@ -1457,11 +1457,11 @@ enable_h5000m_wifi_driver_config() {
   config_enable MTK_WIFI7_DOT11_EHT_BE
   config_enable MTK_WIFI7_FIRST_IF_EEPROM_FLASH
   # RF offsets
-  config_enable MTK_WIFI7_FIRST_IF_RF_OFFSET
-  config_enable MTK_WIFI7_SECOND_IF_RF_OFFSET
-  config_enable MTK_WIFI7_RT_FIRST_IF_RF_OFFSET
-  config_enable MTK_WIFI7_RT_SECOND_IF_RF_OFFSET
-  config_enable MTK_WIFI7_RT_THIRD_IF_RF_OFFSET
+  config_set_symbol MTK_WIFI7_FIRST_IF_RF_OFFSET 0xc0000
+  config_set_symbol MTK_WIFI7_SECOND_IF_RF_OFFSET 0xc8000
+  config_set_symbol MTK_WIFI7_RT_FIRST_IF_RF_OFFSET 0xc0000
+  config_set_symbol MTK_WIFI7_RT_SECOND_IF_RF_OFFSET 0xc8000
+  config_set_symbol MTK_WIFI7_RT_THIRD_IF_RF_OFFSET 0xd0000
   # WIFI7 additional features from upstream
   config_enable MTK_WIFI7_AIR_MONITOR
   config_enable MTK_WIFI7_APCLI_SUPPORT
