@@ -2291,8 +2291,8 @@ collect_artifacts() {
     mtwifi-cfg \
     luci-app-mtwifi-cfg \
     luci-i18n-mtwifi-cfg-zh-cn; do
-    grep -q "^\${image_pkg}[[:space:]-]" "$ARTIFACTS_DIR/openwrt-image.manifest" || \
-      die "Firmware image manifest is missing required package: \${image_pkg}"
+    grep -q "^${image_pkg}[[:space:]-]" "$ARTIFACTS_DIR/openwrt-image.manifest" || \
+      die "Firmware image manifest is missing required package: ${image_pkg}"
   done
 
   if is_true "$ENABLE_ADGUARDHOME" && ! grep -q '^luci-i18n-adguardhome-zh-cn[[:space:]-]' "$ARTIFACTS_DIR/openwrt-image.manifest"; then
