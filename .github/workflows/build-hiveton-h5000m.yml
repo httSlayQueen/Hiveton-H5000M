@@ -2,7 +2,7 @@ name: Hiveton H5000M (ImmortalWrt 24.10)
 
 on:
   schedule:
-    - cron: '0 13 * * 3'
+    - cron: '13 13 * * 3'
   workflow_dispatch:
 
 env:
@@ -29,18 +29,17 @@ jobs:
       - name: 释放硬盘空间
         uses: jlumbroso/free-disk-space@main
         with:
-          # this might remove tools that are actually needed,
-          # if set to "true" but frees about 6 GB
-          tool-cache: false
-          
-          # all of these default to true, but feel free to set to
-          # "false" if necessary for your workflow
+          # these default to true — turn off whatever you actually need
           android: true
           dotnet: true
           haskell: true
           large-packages: true
           docker-images: true
-          swap-storage: true
+
+          # these default to FALSE, because their failures are hard to
+          # trace back to this action — see the FAQ below before enabling
+          preinstalled-runtimes: false
+          swap-storage: false
 
       - name: 安装编译依赖
         shell: bash
@@ -109,7 +108,7 @@ jobs:
           PKG_PATH="$BUILD_PATH/feeds/packages"
           cd $BUILD_PATH
 
-          # patch_mtk_wifi_utility_rbus_for_h5000m
+          ## patch_mtk_wifi_utility_rbus_for_h5000m ##
           rbus_patch="target/linux/mediatek/patches-6.6/0101-add-mtk-wifi-utility-rbus.patch"
           if grep -q '^+obj-y[[:space:]]*+=[[:space:]]*wifi_utility/' "$rbus_patch"; then
             echo "Making MTK wifi_utility rbus optional for H5000M PCIe WiFi"
@@ -118,8 +117,8 @@ jobs:
           grep -q '^+obj-$(CONFIG_MTK_WIFI_UTILITY_RBUS)[[:space:]]*+=[[:space:]]*wifi_utility/' "$rbus_patch" || \
             (echo "MTK wifi_utility rbus patch guard verification failed" && exit 1)
 
-          # patch_mtwifi_apcli_bssid_budget
-          patch_file="${{ github.workspace }}/patches/mtwifi-apcli-active-only.patch"
+          ## patch_mtwifi_apcli_bssid_budget ##
+          patch_file="$PATCH_PATH/mtwifi-apcli-active-only.patch"
           if patch -p1 --forward --dry-run < "$patch_file" >/dev/null 2>&1; then
             patch -p1 < "$patch_file"
           elif patch -p1 --reverse --dry-run < "$patch_file" >/dev/null 2>&1; then
@@ -129,13 +128,31 @@ jobs:
             exit 1
           fi
 
+          ## patch_mtk_hnat_local_dest ##
+          patch_file="$PATCH_PATH/mtk-hnat-local-dest.patch"
+          source_file="target/linux/mediatek/files-6.6/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c"
+          [ -f "$source_file" ] || { echo "WARNING: HNAT source $source_file not found; skipping local-destination guard"; }
+          if grep -q 'Never offload flows destined to a locally' "$source_file"; then
+            echo "MTK HNAT local-destination guard already applied"
+          fi
+          if patch -p1 --forward --dry-run < "$patch_file" >/dev/null 2>&1; then
+          patch -p1 < "$patch_file"
+          elif patch -p1 --reverse --dry-run < "$patch_file" >/dev/null 2>&1; then
+            echo "MTK HNAT local-destination guard already applied"
+          else
+            echo "Unable to apply MTK HNAT local-destination guard patch (upstream driver changed?)"
+            exit 1
+          fi
+          grep -q 'inet_addr_type(&init_net, iph->daddr) == RTN_LOCAL' "$source_file" || \
+             { echo "MTK HNAT local-destination guard patch verification failed"; exit 1; }
+
           # 最新源码
           cat $PATCH_PATH/podman > $PKG_PATH/utils/podman/Makefile
           cat $PATCH_PATH/podman-patch > $PKG_PATH/utils/podman/patches/010-do-not-build-docs.patch
 
-          # golang 1.26.x
+          # golang 1.27.x
           rm -rf "$PKG_PATH/lang/golang"
-          git clone https://github.com/sbwml/packages_lang_golang.git --depth 1 -b 26.x $PKG_PATH/lang/golang
+          git clone https://github.com/sbwml/packages_lang_golang.git --depth 1 -b 27.x $PKG_PATH/lang/golang
 
           # rust - llvm.download-ci-llvm = true
           rm -rf "$PKG_PATH/lang/rust"
@@ -296,12 +313,12 @@ jobs:
            <img src="https://img.shields.io/badge/若下载慢可套用国内加速站下载-FC7C0D?logo=github&logoColor=fff&labelColor=000&style=for-the-badge"/>
           </a>
           
-          - 🏠 **后台地址**: `192.168.100.1`
-          - 👤 **用户名**: `root`
-          - 🔑 **密码**: `admin`
+          - 🏠 **后台地址**: \`192.168.100.1\`
+          - 👤 **用户名**: \`root\`
+          - 🔑 **密码**: \`admin\`
           - 📱 **移动网络支持**: [QModem](https://github.com/FUjr/QModem)
           - 🚢 **容器支持**：[luci-app-podman](https://github.com/Zerogiven-OpenWRT-Packages/luci-app-podman)
-          - 🦽 **其他软件包**：[passwall2](https://github.com/Openwrt-Passwall/openwrt-passwall2)、UPnP
+          - 🦽 **其他软件包**：[passwall2](https://github.com/Openwrt-Passwall/openwrt-passwall2)(xray-core & sing-box)、UPnP
           EOF
 
           echo "release_tag=ImmortalWrt-24.10-SNAPSHOT" >> $GITHUB_OUTPUT
