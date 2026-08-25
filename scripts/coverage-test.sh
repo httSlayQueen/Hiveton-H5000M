@@ -43,13 +43,9 @@ base_env=(
   ENABLE_VLMCSD=true
   ENABLE_MOSDNS=true
   ENABLE_DOCKERMAN=false
-  ENABLE_QMODEM_NEXT=true
-  ENABLE_QMODEM=false
   ENABLE_HOMEPROXY=false
-  ENABLE_ADBYBY_PLUS=false
-  ENABLE_ORIGINAL_MODEM=false
-  ENABLE_EASYMESH=true
-  ENABLE_MWAN3=false
+  ENABLE_ORIGINAL_MODEM=true
+  ENABLE_ADBLOCK=true
 )
 
 run_static_checks() {
@@ -108,43 +104,32 @@ run_named_profile() {
       ;;
     mosdns-only)
       run_profile mosdns-only "$mode" \
-        ENABLE_NIKKI=false ENABLE_MOSDNS=true ENABLE_QMODEM_NEXT=false
+        ENABLE_NIKKI=false ENABLE_MOSDNS=true
       ;;
     nikki-only)
       run_profile nikki-only "$mode" \
-        ENABLE_NIKKI=true ENABLE_MOSDNS=false ENABLE_QMODEM_NEXT=false
-      ;;
-    qmodem-legacy)
-      run_profile qmodem-legacy "$mode" \
-        ENABLE_QMODEM=true ENABLE_QMODEM_NEXT=false
+        ENABLE_NIKKI=true ENABLE_MOSDNS=false
       ;;
     original-modem)
       run_profile original-modem "$mode" \
-        ENABLE_NIKKI=false ENABLE_MOSDNS=false ENABLE_QMODEM_NEXT=false ENABLE_ORIGINAL_MODEM=true
+        ENABLE_NIKKI=false ENABLE_MOSDNS=false ENABLE_ORIGINAL_MODEM=true
+      ;;
+    adblock)
+      run_profile adblock "$mode" \
+        ENABLE_NIKKI=false ENABLE_MOSDNS=false ENABLE_ADBLOCK=true
       ;;
     optional-services)
       run_profile optional-services "$mode" \
-        ENABLE_ADGUARDHOME=true ENABLE_OPENCLASH=true ENABLE_ADBYBY_PLUS=true \
+        ENABLE_ADGUARDHOME=true ENABLE_OPENCLASH=true \
       ;;
     all-compatible)
       run_profile all-compatible "$mode" \
         ENABLE_ADGUARDHOME=true ENABLE_OPENCLASH=true ENABLE_NIKKI=true ENABLE_UPNP=true \
-        ENABLE_VLMCSD=true ENABLE_MOSDNS=true ENABLE_DOCKERMAN=true ENABLE_QMODEM_NEXT=true \
-        ENABLE_ORIGINAL_MODEM=false ENABLE_EASYMESH=true
+        ENABLE_VLMCSD=true ENABLE_MOSDNS=true ENABLE_DOCKERMAN=true \
       ;;
     dockerman)
       run_profile dockerman "$mode" \
-        ENABLE_NIKKI=false ENABLE_MOSDNS=false ENABLE_DOCKERMAN=true ENABLE_QMODEM_NEXT=false
-      ;;
-    mwan3)
-      run_profile mwan3 "$mode" \
-        ENABLE_NIKKI=false ENABLE_MOSDNS=false ENABLE_QMODEM_NEXT=false ENABLE_MWAN3=true
-      ;;
-    all-compatible-mwan3)
-      run_profile all-compatible-mwan3 "$mode" \
-        ENABLE_ADGUARDHOME=true ENABLE_OPENCLASH=true ENABLE_NIKKI=true ENABLE_UPNP=true \
-        ENABLE_VLMCSD=true ENABLE_MOSDNS=true ENABLE_DOCKERMAN=true ENABLE_QMODEM_NEXT=true \
-        ENABLE_ORIGINAL_MODEM=false ENABLE_EASYMESH=true ENABLE_MWAN3=true
+        ENABLE_NIKKI=false ENABLE_MOSDNS=false ENABLE_DOCKERMAN=true
       ;;
     *)
       echo "Unknown coverage profile: $name" >&2
@@ -159,7 +144,7 @@ profiles_for_set() {
       printf '%s\n' default proxy-stack
       ;;
     full)
-      printf '%s\n' default minimal proxy-stack homeproxy-only mosdns-only nikki-only qmodem-legacy original-modem optional-services all-compatible dockerman mwan3 all-compatible-mwan3
+      printf '%s\n' default minimal proxy-stack homeproxy-only mosdns-only nikki-only original-modem adblock optional-services all-compatible dockerman
       ;;
     *)
       echo "Unknown PROFILE_SET: $PROFILE_SET" >&2

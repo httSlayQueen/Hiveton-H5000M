@@ -53,40 +53,20 @@ on:
         required: false
         default: false
         type: boolean
-      enable_qmodem_next:
-        description: '启用 QModem Next (新版)'
-        required: false
-        default: true
-        type: boolean
-      enable_qmodem:
-        description: '启用 QModem (旧版)'
-        required: false
-        default: false
-        type: boolean
       enable_homeproxy:
         description: '启用 HomeProxy'
         required: false
         default: false
         type: boolean
-      enable_adbyby_plus:
-        description: '启用 Adbyby Plus'
-        required: false
-        default: false
-        type: boolean
       enable_original_modem:
-        description: '启用原版 Modem'
-        required: false
-        default: false
-        type: boolean
-      enable_easymesh:
-        description: '启用 EasyMesh / 802.11s Mesh 支持'
+        description: '启用原版 Modem（luci-app-modem + ModemManager，支持 Quectel RG501Q-EU/RM5xxQ 等 QMI 5G 模块）'
         required: false
         default: true
         type: boolean
-      enable_mwan3:
-        description: '启用 MWAN3 MultiWAN Manager（多WAN负载均衡/故障切换）'
+      enable_adblock:
+        description: '启用 Adblock（DNS 层广告/恶意域名过滤，依赖 dnsmasq/unbound/smartdns）'
         required: false
-        default: false
+        default: true
         type: boolean
       publish_release:
         description: '上传 Release（默认 true）'
@@ -151,9 +131,7 @@ jobs:
           declare -A scheduled_defaults=(
             [enable_adguardhome]=false [enable_openclash]=false [enable_nikki]=true
             [enable_upnp]=true [enable_vlmcsd]=true [enable_mosdns]=true [enable_dockerman]=false
-            [enable_qmodem_next]=true [enable_qmodem]=false [enable_homeproxy]=false
-            [enable_adbyby_plus]=false [enable_original_modem]=false [enable_easymesh]=true
-            [enable_mwan3]=false
+            [enable_homeproxy]=false [enable_original_modem]=true [enable_adblock]=true
             [publish_release]=true [run_config_coverage]=false [coverage_profile_set]=quick
             [full_build_smoke_profile]=''
           )
@@ -165,13 +143,9 @@ jobs:
             [enable_vlmcsd]='${{ github.event.inputs.enable_vlmcsd }}'
             [enable_mosdns]='${{ github.event.inputs.enable_mosdns }}'
             [enable_dockerman]='${{ github.event.inputs.enable_dockerman }}'
-            [enable_qmodem_next]='${{ github.event.inputs.enable_qmodem_next }}'
-            [enable_qmodem]='${{ github.event.inputs.enable_qmodem }}'
             [enable_homeproxy]='${{ github.event.inputs.enable_homeproxy }}'
-            [enable_adbyby_plus]='${{ github.event.inputs.enable_adbyby_plus }}'
             [enable_original_modem]='${{ github.event.inputs.enable_original_modem }}'
-            [enable_easymesh]='${{ github.event.inputs.enable_easymesh }}'
-            [enable_mwan3]='${{ github.event.inputs.enable_mwan3 }}'
+            [enable_adblock]='${{ github.event.inputs.enable_adblock }}'
             [publish_release]='${{ github.event.inputs.publish_release }}'
             [run_config_coverage]='${{ github.event.inputs.run_config_coverage }}'
             [coverage_profile_set]='${{ github.event.inputs.coverage_profile_set }}'
@@ -236,9 +210,7 @@ jobs:
           declare -A defaults=(
             [enable_adguardhome]=false [enable_openclash]=false [enable_nikki]=true
             [enable_upnp]=true [enable_vlmcsd]=true [enable_mosdns]=true [enable_dockerman]=false
-            [enable_qmodem_next]=true [enable_qmodem]=false [enable_homeproxy]=false
-            [enable_adbyby_plus]=false [enable_original_modem]=false [enable_easymesh]=true
-            [enable_mwan3]=false
+            [enable_homeproxy]=false [enable_original_modem]=true [enable_adblock]=true
             [publish_release]=true
           )
           declare -A inputs=(
@@ -249,13 +221,9 @@ jobs:
             [enable_vlmcsd]='${{ github.event.inputs.enable_vlmcsd }}'
             [enable_mosdns]='${{ github.event.inputs.enable_mosdns }}'
             [enable_dockerman]='${{ github.event.inputs.enable_dockerman }}'
-            [enable_qmodem_next]='${{ github.event.inputs.enable_qmodem_next }}'
-            [enable_qmodem]='${{ github.event.inputs.enable_qmodem }}'
             [enable_homeproxy]='${{ github.event.inputs.enable_homeproxy }}'
-            [enable_adbyby_plus]='${{ github.event.inputs.enable_adbyby_plus }}'
             [enable_original_modem]='${{ github.event.inputs.enable_original_modem }}'
-            [enable_easymesh]='${{ github.event.inputs.enable_easymesh }}'
-            [enable_mwan3]='${{ github.event.inputs.enable_mwan3 }}'
+            [enable_adblock]='${{ github.event.inputs.enable_adblock }}'
             [publish_release]='${{ github.event.inputs.publish_release }}'
           )
           for k in "${!defaults[@]}"; do
@@ -330,13 +298,9 @@ jobs:
           ENABLE_VLMCSD: ${{ steps.features.outputs.enable_vlmcsd }}
           ENABLE_MOSDNS: ${{ steps.features.outputs.enable_mosdns }}
           ENABLE_DOCKERMAN: ${{ steps.features.outputs.enable_dockerman }}
-          ENABLE_QMODEM_NEXT: ${{ steps.features.outputs.enable_qmodem_next }}
-          ENABLE_QMODEM: ${{ steps.features.outputs.enable_qmodem }}
           ENABLE_HOMEPROXY: ${{ steps.features.outputs.enable_homeproxy }}
-          ENABLE_ADBYBY_PLUS: ${{ steps.features.outputs.enable_adbyby_plus }}
           ENABLE_ORIGINAL_MODEM: ${{ steps.features.outputs.enable_original_modem }}
-          ENABLE_EASYMESH: ${{ steps.features.outputs.enable_easymesh }}
-          ENABLE_MWAN3: ${{ steps.features.outputs.enable_mwan3 }}
+          ENABLE_ADBLOCK: ${{ steps.features.outputs.enable_adblock }}
         run: |
           set -euo pipefail
           export PATH="/usr/lib/ccache:$PATH"
@@ -384,13 +348,9 @@ jobs:
             - VLMCSd:      ${{ steps.features.outputs.enable_vlmcsd }}
             - MosDNS:      ${{ steps.features.outputs.enable_mosdns }}
             - DockerMan:   ${{ steps.features.outputs.enable_dockerman }}
-            - QModem Next: ${{ steps.features.outputs.enable_qmodem_next }}
-            - QModem:      ${{ steps.features.outputs.enable_qmodem }}
             - HomeProxy:   ${{ steps.features.outputs.enable_homeproxy }}
-            - Adbyby Plus: ${{ steps.features.outputs.enable_adbyby_plus }}
             - 原版 Modem:  ${{ steps.features.outputs.enable_original_modem }}
-            - EasyMesh:    ${{ steps.features.outputs.enable_easymesh }}
-            - MWAN3:       ${{ steps.features.outputs.enable_mwan3 }}
+            - Adblock:     ${{ steps.features.outputs.enable_adblock }}
           prerelease: false
           make_latest: true
           overwrite_files: true
