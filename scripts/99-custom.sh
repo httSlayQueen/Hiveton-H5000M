@@ -1,7 +1,7 @@
 #!/bin/sh
 # 99-custom.sh 就是immortalwrt固件首次启动时运行的脚本 位于固件内的/etc/uci-defaults/99-custom.sh
 # Log file for debugging
-LOGFILE="/etc/config/uci-defaults-log.txt"
+LOGFILE="/etc/uci-defaults-log.txt"
 echo "Starting 99-custom.sh at $(date)" >>$LOGFILE
 
 
@@ -20,5 +20,8 @@ FILE_PATH="/etc/openwrt_release"
 NEW_DESCRIPTION="Packaged by HTT"
 sed -i "s/DISTRIB_DESCRIPTION='[^']*'/DISTRIB_DESCRIPTION='$NEW_DESCRIPTION'/" "$FILE_PATH"
 
+# 修改 opkg 源
+echo "删除编译时使用的自定义源 custom"  >> $LOGFILE
+sed -i '/custom/d' /etc/opkg/distfeeds.conf
 
 exit 0
