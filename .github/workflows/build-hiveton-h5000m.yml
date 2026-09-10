@@ -151,9 +151,9 @@ jobs:
           cat $PATCH_PATH/podman > $PKG_PATH/utils/podman/Makefile
           cat $PATCH_PATH/podman-patch > $PKG_PATH/utils/podman/patches/010-do-not-build-docs.patch
 
-          # golang 1.26.x
+          # golang 1.27.x
           rm -rf "$PKG_PATH/lang/golang"
-          git clone https://github.com/sbwml/packages_lang_golang.git --depth 1 -b 26.x $PKG_PATH/lang/golang
+          git clone https://github.com/sbwml/packages_lang_golang.git --depth 1 -b 27.x $PKG_PATH/lang/golang
 
           # rust - llvm.download-ci-llvm = true
           rm -rf "$PKG_PATH/lang/rust"
