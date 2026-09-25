@@ -24,4 +24,10 @@ sed -i "s/DISTRIB_DESCRIPTION='[^']*'/DISTRIB_DESCRIPTION='$NEW_DESCRIPTION'/" "
 echo "删除编译时使用的自定义源 custom"  >> $LOGFILE
 sed -i '/custom/d' /etc/opkg/distfeeds.conf
 
+# qmodem-ttl: 排除对IPv6 ND报文的修改
+sed -e '
+/iifname "br-lan" ip6 hoplimit set 64 comment "Reset Hop Limit for br-lan IPv6"/i\
+    iifname "br-lan" icmpv6 type { nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, nd-redirect } return comment "Skip hoplimit rewrite for ND packets"
+'  -i /etc/init.d/qmodem_ttl
+
 exit 0
