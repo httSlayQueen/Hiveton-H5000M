@@ -70,8 +70,7 @@ jobs:
           # imm 源码
           git clone ${{ env.REPO_URL }} --depth 1 -b ${{ env.REPO_BRANCH }} $BUILD_PATH
           # 补丁：package 仓库最新软件
-          curl -o $PATCH_PATH/podman https://raw.githubusercontent.com/immortalwrt/packages/refs/heads/master/utils/podman/Makefile
-          curl -o $PATCH_PATH/podman-patch https://raw.githubusercontent.com/immortalwrt/packages/refs/heads/master/utils/podman/patches/010-do-not-build-docs.patch
+          git clone https://github.com/immortalwrt/packages.git --depth 1 -b master $PATCH_PATH/pkg
 
           # feeds列表
           git clone https://github.com/FUjr/QModem.git --depth 1 -b main $FEED_PATH/qmodem
@@ -147,8 +146,8 @@ jobs:
              { echo "MTK HNAT local-destination guard patch verification failed"; exit 1; }
 
           # 最新源码
-          cat $PATCH_PATH/podman > $PKG_PATH/utils/podman/Makefile
-          cat $PATCH_PATH/podman-patch > $PKG_PATH/utils/podman/patches/010-do-not-build-docs.patch
+          rm -rf $PKG_PATH/utils/podman
+          cp -r $PATCH_PATH/pkg/utils/podman $PKG_PATH/utils/
 
           # golang 1.27.x
           rm -rf "$PKG_PATH/lang/golang"
