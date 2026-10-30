@@ -80,6 +80,7 @@ jobs:
           git clone https://github.com/Zerogiven-OpenWRT-Packages/luci-app-podman.git --depth 1 -b main $FEED_PATH/luci-app-podman
           git clone https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git --depth 1 -b main $FEED_PATH/passwall-packages
           git clone https://github.com/Openwrt-Passwall/openwrt-passwall2.git --depth 1 -b main $FEED_PATH/passwall2
+          git clone https://github.com/eamonxg/luci-theme-aurora.git --depth 1 -b main $FEED_PATH/luci-theme-aurora
           
           sed -i "1i src-link custom $FEED_PATH" $BUILD_PATH/feeds.conf.default
 
@@ -173,8 +174,8 @@ jobs:
           BUILD_PATH="${{ github.workspace }}/${{ env.SOURCE_DIR }}"
           # 设置 .config
           cat $BUILD_PATH/defconfig/mt7987_mt7992.config > $BUILD_PATH/.config
-          cat ${{ github.workspace }}/hiveton-h5000m.config >> $BUILD_PATH/.config
           cat ${{ github.workspace }}/h5000m.extra.config >> $BUILD_PATH/.config
+          cat ${{ github.workspace }}/hiveton-h5000m.config >> $BUILD_PATH/.config
 
           disabled_pkgs=("luci-app-modem" "sms-tool")
           for pkg in "${disabled_pkgs[@]}"; do
