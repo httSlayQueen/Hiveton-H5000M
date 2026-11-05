@@ -23,11 +23,11 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: 释放硬盘空间
-        uses: jlumbroso/free-disk-space@main
+        uses: lumbroso-commons/free-disk-space@main
         with:
           # these default to true — turn off whatever you actually need
           android: true
@@ -80,7 +80,7 @@ jobs:
           git clone https://github.com/Zerogiven-OpenWRT-Packages/luci-app-podman.git --depth 1 -b main $FEED_PATH/luci-app-podman
           git clone https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git --depth 1 -b main $FEED_PATH/passwall-packages
           git clone https://github.com/Openwrt-Passwall/openwrt-passwall2.git --depth 1 -b main $FEED_PATH/passwall2
-          git clone https://github.com/eamonxg/luci-theme-aurora.git --depth 1 -b main $FEED_PATH/luci-theme-aurora
+          git clone https://github.com/eamonxg/luci-theme-aurora.git --depth 1 -b master $FEED_PATH/luci-theme-aurora
           git clone https://github.com/jerrykuku/luci-theme-argon.git --depth 1 -b master $FEED_PATH/luci-theme-argon
           
           sed -i "1i src-link custom $FEED_PATH" $BUILD_PATH/feeds.conf.default
